@@ -26,16 +26,21 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--config", default="config.ini", help="Ruta de config.ini")
     parser.add_argument("--env", default=".env", help="Ruta del archivo .env")
     parser.add_argument("--delimiter", default=",", help="Delimitador del CSV")
+    parser.add_argument("--report", default=None, help="Clave del reporte a consumir (override de CERT_REPORT)")
+    parser.add_argument("--timeout", type=int, default=None, help="Timeout en segundos (override de CERT_TIMEOUT)")
     return parser.parse_args(argv)
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
     try:
-        settings = load_settings(args.config, args.env)
+        settings = load_settings(args.config, args.env, report=args.report, timeout=args.timeout)
     except CertificadoError as exc:
         print(f"[CONFIG] {exc}", file=sys.stderr)
         return 2
+
+    print(f"Reporte: {settings.report_key} -> {settings.report_path}")
+    print(f"Timeout: {settings.timeout}s")
 
     reader = CSVReader(args.csv, delimiter=args.delimiter)
     validator = build_default_validator()

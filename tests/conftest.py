@@ -7,12 +7,22 @@ from certificados.config import Settings
 from certificados.models import ReportRequest
 
 
+@pytest.fixture(autouse=True)
+def _clean_cert_env(monkeypatch):
+    """Isolate tests: load_dotenv no sobrescribe os.environ, asi que limpiamos
+    las variables CERT_* antes de cada test para que el .env de cada caso mande."""
+    for var in ("CERT_USER", "CERT_PASSWORD", "CERT_TIMEOUT", "CERT_REPORT"):
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     return Settings(
         host="https://example.test",
         service_path="/xmlpserver/services/v2/ReportService",
         report_path="/Custom/Report.xdo",
+        report_key="certificado_calidad",
+        reports={"certificado_calidad": "/Custom/Report.xdo"},
         user="user",
         password="pass",
         timeout=30,

@@ -102,9 +102,29 @@ Los PDF/XLSX se guardan en `output/`; la trazabilidad en `logs/`.
 
 ## 5. Configuración externa (sin secretos en el código)
 
-- `config.ini` — host, endpoint, ruta del reporte, timeout, verify_ssl, carpetas.
-- `.env` — `CERT_USER`, `CERT_PASSWORD` (git-ignored). Las variables de entorno
-  tienen prioridad sobre el archivo, útil en CI/contenedores.
+- `config.ini`
+  - `[service]` — host, endpoint, timeout, verify_ssl, `default_report`.
+  - `[reports]` — **catálogo** de reportes `clave = ruta.xdo`. Tienes varios
+    reportes iguales con distintos datos: registra cada uno aquí.
+  - `[output]` / `[logging]` — carpetas y nivel de log.
+- `.env` (git-ignored)
+  - `CERT_USER`, `CERT_PASSWORD` — credenciales.
+  - `CERT_TIMEOUT` — timeout en segundos.
+  - `CERT_REPORT` — **clave** del reporte a consumir (del catálogo `[reports]`).
+
+**Precedencia:** argumento CLI > variable de entorno (`.env`) > `config.ini`.
+
+```powershell
+# elegir reporte y timeout desde .env  → solo editas .env
+CERT_REPORT=certificado_exportacion
+CERT_TIMEOUT=600
+
+# o puntualmente por CLI (gana sobre .env)
+python main.py --csv datos.csv --report certificado_exportacion --timeout 600
+```
+
+Agregar un reporte nuevo: añade una línea en `[reports]` y apunta `CERT_REPORT`
+a esa clave. No se toca código.
 
 ---
 
