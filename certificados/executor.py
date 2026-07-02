@@ -43,6 +43,12 @@ class OracleReportClient(ReportGateway):
         self._settings = settings
         # Session injected for testability (Dependency Inversion).
         self._session = session or requests.Session()
+        # Con verify_ssl=false requests emite InsecureRequestWarning en cada
+        # llamada; si el usuario apago la verificacion a proposito, evitamos el ruido.
+        if not settings.verify_ssl:
+            import urllib3
+
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # -- public API ---------------------------------------------------------
     def run_report(self, request: ReportRequest) -> ReportResult:
@@ -93,7 +99,8 @@ class OracleReportClient(ReportGateway):
                 data=soap.encode("utf-8"),
                 headers=headers,
                 verify=self._settings.verify_ssl,
-                timeout=self._settings.timeout,
+                # (connect, read): read cubre reportes que tardan hasta ~70 min.
+                timeout=self._settings.request_timeout,
             )
         except requests.exceptions.Timeout as exc:
             raise ReportConnectionError(f"Timeout al llamar al servicio: {exc}") from exc

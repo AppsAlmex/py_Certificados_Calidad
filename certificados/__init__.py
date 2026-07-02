@@ -28,7 +28,7 @@ from .validators import (
 )
 from .executor import ReportGateway, OracleReportClient
 from .result_logger import ResultLogger
-from .batch import BatchProcessor
+from .batch import BatchProcessor, ConcurrentBatchProcessor
 
 __all__ = [
     "Settings",
@@ -58,4 +58,5 @@ __all__ = [
     "OracleReportClient",
     "ResultLogger",
     "BatchProcessor",
+    "ConcurrentBatchProcessor",
 ]

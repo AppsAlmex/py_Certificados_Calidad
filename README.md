@@ -128,6 +128,45 @@ a esa clave. No se toca código.
 
 ---
 
+## 5b. Reportes largos (timeout) y concurrencia
+
+### Timeout — reportes de hasta ~70 min
+
+El `timeout` de `requests` **no es el tiempo total**; son dos cosas:
+`(connect, read)`.
+
+- **connect** (`CERT_CONNECT_TIMEOUT` / `connect_timeout`) — abrir la conexión. Corto (30s).
+- **read** (`CERT_TIMEOUT` / `timeout`) — inactividad entre bytes. Como Oracle
+  responde recién al terminar de generar, **debe cubrir toda la duración**.
+  Para 70 min usa `CERT_TIMEOUT=5400` (90 min, con margen).
+
+El sistema arma la tupla automáticamente: `Settings.request_timeout → (connect, read)`.
+
+> ⚠️ Un load balancer / gateway / Oracle pueden cortar la conexión antes,
+> sin importar el timeout del cliente. Para reportes extremadamente largos, lo
+> robusto es el patrón async del servidor (`scheduleReport` + polling). Con
+> timeout alto se llega lejos; solo tenlo presente.
+
+### Concurrencia — varias peticiones en paralelo
+
+Como cada petición pasa la mayor parte del tiempo *esperando* a Oracle (I/O-bound)
+y `requests` es síncrono, se usan **hilos** (`ThreadPoolExecutor`), no `asyncio`
+(evitamos reescribir el gateway y romper la integridad).
+
+- `CERT_WORKERS` / `--workers N` / `[batch] max_workers`.
+- **`1` = secuencial (comportamiento original, default).**
+- `>1` → `ConcurrentBatchProcessor`: valida secuencial (barato) y ejecuta las
+  filas válidas en paralelo. Mismo resultado por fila, solo más rápido.
+- `ResultLogger` es thread-safe (lock en la escritura del CSV).
+
+```powershell
+# 4 reportes a la vez
+python main.py --csv datos.csv --workers 4
+```
+
+No se modificó `BatchProcessor` ni el gateway (OCP/LSP): la concurrencia es una
+clase nueva, opt-in.
+
 ## 6. Errores comunes
 
 | Síntoma | Causa | Solución |

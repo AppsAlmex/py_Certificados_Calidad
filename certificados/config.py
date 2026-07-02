@@ -26,6 +26,8 @@ class Settings:
     user: str
     password: str
     timeout: int
+    connect_timeout: int
+    max_workers: int
     verify_ssl: bool
     output_dir: Path
     log_dir: Path
@@ -34,6 +36,11 @@ class Settings:
     @property
     def service_url(self) -> str:
         return f"{self.host}{self.service_path}"
+
+    @property
+    def request_timeout(self) -> tuple[int, int]:
+        """(connect, read) para requests. read cubre reportes muy largos."""
+        return (self.connect_timeout, self.timeout)
 
 
 def _get(parser: configparser.ConfigParser, section: str, option: str, fallback=None):
@@ -66,6 +73,7 @@ def load_settings(
     env_path: str | os.PathLike = ".env",
     report: str | None = None,
     timeout: int | None = None,
+    workers: int | None = None,
 ) -> Settings:
     """Build ``Settings`` from ``config.ini`` + ``.env``.
 
@@ -75,8 +83,10 @@ def load_settings(
 
     Variables de entorno soportadas:
       * ``CERT_USER`` / ``CERT_PASSWORD`` — credenciales.
-      * ``CERT_TIMEOUT``               — timeout en segundos.
+      * ``CERT_TIMEOUT``               — read timeout en segundos (reportes largos).
+      * ``CERT_CONNECT_TIMEOUT``       — connect timeout en segundos.
       * ``CERT_REPORT``                — clave del reporte a consumir ([reports]).
+      * ``CERT_WORKERS``               — hilos concurrentes (1 = secuencial).
     """
     load_dotenv(env_path)
 
@@ -103,6 +113,28 @@ def load_settings(
         raise ConfigError(f"timeout invalido: '{timeout_raw}'") from exc
     if timeout_value <= 0:
         raise ConfigError(f"timeout debe ser mayor a 0, recibido: {timeout_value}")
+
+    # -- connect timeout: CERT_CONNECT_TIMEOUT > config.ini -------------------
+    try:
+        connect_timeout = int(
+            os.getenv("CERT_CONNECT_TIMEOUT")
+            or _get(parser, "service", "connect_timeout", fallback="30")
+        )
+    except (ValueError, TypeError) as exc:
+        raise ConfigError(f"connect_timeout invalido: {exc}") from exc
+    if connect_timeout <= 0:
+        raise ConfigError(f"connect_timeout debe ser mayor a 0, recibido: {connect_timeout}")
+
+    # -- workers: arg > CERT_WORKERS > config.ini -----------------------------
+    workers_raw = workers if workers is not None else (
+        os.getenv("CERT_WORKERS") or _get(parser, "batch", "max_workers", fallback="1")
+    )
+    try:
+        max_workers = int(workers_raw)
+    except (ValueError, TypeError) as exc:
+        raise ConfigError(f"workers invalido: '{workers_raw}'") from exc
+    if max_workers < 1:
+        raise ConfigError(f"workers debe ser >= 1, recibido: {max_workers}")
 
     # -- reporte: arg > CERT_REPORT > default_report > primero del catalogo ----
     reports = _resolve_reports(parser)
@@ -136,6 +168,8 @@ def load_settings(
         user=user,
         password=password,
         timeout=timeout_value,
+        connect_timeout=connect_timeout,
+        max_workers=max_workers,
         verify_ssl=verify_ssl,
         output_dir=Path(_get(parser, "output", "output_dir", fallback="output")),
         log_dir=Path(_get(parser, "logging", "log_dir", fallback="logs")),

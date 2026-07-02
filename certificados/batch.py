@@ -10,12 +10,32 @@ piece can be swapped without touching this class.
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .csv_reader import CSVReader
 from .exceptions import CertificadoError
 from .models import BatchSummary
 from .result_logger import ResultLogger
 from .validators import RequestValidator
+
+
+def _execute_and_log(gateway, logger: ResultLogger, request) -> bool:
+    """Ejecuta una solicitud ya validada y registra el resultado.
+
+    Compartido por el procesador secuencial y el concurrente para que ambos
+    tengan EXACTAMENTE el mismo comportamiento por fila. Devuelve True si OK.
+    """
+    start = time.perf_counter()
+    try:
+        report = gateway.run_report(request)
+        logger.log_success(report, time.perf_counter() - start)
+        return True
+    except CertificadoError as exc:
+        logger.log_failure(request, exc, time.perf_counter() - start)
+        return False
+    except Exception as exc:  # inesperado: registrar y continuar
+        logger.log_failure(request, exc, time.perf_counter() - start)
+        return False
 
 
 class BatchProcessor:
@@ -38,16 +58,55 @@ class BatchProcessor:
                 summary.invalid += 1
                 continue
 
-            try:
-                report = self._gateway.run_report(request)
-                self._logger.log_success(report, time.perf_counter() - start)
+            if _execute_and_log(self._gateway, self._logger, request):
                 summary.success += 1
-            except CertificadoError as exc:
-                self._logger.log_failure(request, exc, time.perf_counter() - start)
+            else:
                 summary.failed += 1
-            except Exception as exc:  # unexpected: log, keep going
-                self._logger.log_failure(request, exc, time.perf_counter() - start)
-                summary.failed += 1
+
+        self._logger.summary(summary)
+        return summary
+
+
+class ConcurrentBatchProcessor:
+    """Igual que ``BatchProcessor`` pero ejecuta N solicitudes en paralelo con
+    hilos (Tarea 6, variante concurrente).
+
+    Mismo contrato y mismo resultado por fila; solo cambia que varias peticiones
+    a Oracle corren a la vez (ideal para reportes que tardan mucho). La validacion
+    se hace primero de forma secuencial (barata) y solo las solicitudes validas
+    se envian al pool. ``max_workers=1`` equivale al comportamiento secuencial.
+    """
+
+    def __init__(self, reader, validator: RequestValidator, gateway, logger: ResultLogger, max_workers: int = 4):
+        self._reader = reader
+        self._validator = validator
+        self._gateway = gateway
+        self._logger = logger
+        self._max_workers = max(1, max_workers)
+
+    def run(self) -> BatchSummary:
+        requests = self._reader.read()
+        summary = BatchSummary(total=len(requests))
+
+        valid = []
+        for request in requests:
+            result = self._validator.validate(request)
+            if result.valid:
+                valid.append(request)
+            else:
+                self._logger.log_invalid(request, result.issues, 0.0)
+                summary.invalid += 1
+
+        with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
+            futures = {
+                pool.submit(_execute_and_log, self._gateway, self._logger, req): req
+                for req in valid
+            }
+            for future in as_completed(futures):
+                if future.result():
+                    summary.success += 1
+                else:
+                    summary.failed += 1
 
         self._logger.summary(summary)
         return summary

@@ -26,6 +26,8 @@ def settings(tmp_path) -> Settings:
         user="user",
         password="pass",
         timeout=30,
+        connect_timeout=5,
+        max_workers=1,
         verify_ssl=False,
         output_dir=tmp_path / "output",
         log_dir=tmp_path / "logs",

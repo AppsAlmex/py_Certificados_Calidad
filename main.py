@@ -11,6 +11,7 @@ import sys
 
 from certificados import (
     BatchProcessor,
+    ConcurrentBatchProcessor,
     CSVReader,
     OracleReportClient,
     ResultLogger,
@@ -27,27 +28,37 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--env", default=".env", help="Ruta del archivo .env")
     parser.add_argument("--delimiter", default=",", help="Delimitador del CSV")
     parser.add_argument("--report", default=None, help="Clave del reporte a consumir (override de CERT_REPORT)")
-    parser.add_argument("--timeout", type=int, default=None, help="Timeout en segundos (override de CERT_TIMEOUT)")
+    parser.add_argument("--timeout", type=int, default=None, help="Read timeout en segundos (override de CERT_TIMEOUT)")
+    parser.add_argument("--workers", type=int, default=None, help="Hilos concurrentes (override de CERT_WORKERS; 1 = secuencial)")
     return parser.parse_args(argv)
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
     try:
-        settings = load_settings(args.config, args.env, report=args.report, timeout=args.timeout)
+        settings = load_settings(
+            args.config, args.env, report=args.report, timeout=args.timeout, workers=args.workers
+        )
     except CertificadoError as exc:
         print(f"[CONFIG] {exc}", file=sys.stderr)
         return 2
 
     print(f"Reporte: {settings.report_key} -> {settings.report_path}")
-    print(f"Timeout: {settings.timeout}s")
+    print(f"Timeout: connect={settings.connect_timeout}s read={settings.timeout}s")
+    print(f"Workers: {settings.max_workers}")
 
     reader = CSVReader(args.csv, delimiter=args.delimiter)
     validator = build_default_validator()
     gateway = OracleReportClient(settings)
 
     with ResultLogger(settings.log_dir, settings.log_level) as logger:
-        processor = BatchProcessor(reader, validator, gateway, logger)
+        # 1 worker = secuencial (comportamiento original); >1 = concurrente.
+        if settings.max_workers > 1:
+            processor = ConcurrentBatchProcessor(
+                reader, validator, gateway, logger, max_workers=settings.max_workers
+            )
+        else:
+            processor = BatchProcessor(reader, validator, gateway, logger)
         try:
             summary = processor.run()
         except CertificadoError as exc:

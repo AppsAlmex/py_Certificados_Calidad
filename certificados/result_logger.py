@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -37,6 +38,8 @@ class ResultLogger:
     def __init__(self, log_dir: str | Path, level: str = "INFO"):
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        # Protege la escritura del CSV cuando varios hilos registran a la vez.
+        self._lock = threading.Lock()
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         self.results_path = self.log_dir / f"resultados_{stamp}.csv"
@@ -80,19 +83,20 @@ class ResultLogger:
 
     # -- infra --------------------------------------------------------------
     def _row(self, request: ReportRequest, status: str, duration: float, archivo: str, message: str) -> None:
-        self._writer.writerow(
-            [
-                datetime.now().isoformat(timespec="seconds"),
-                request.row_number,
-                status,
-                request.output_format,
-                f"{duration:.2f}",
-                archivo,
-                json.dumps(request.params, ensure_ascii=False),
-                message,
-            ]
-        )
-        self._results_file.flush()
+        with self._lock:
+            self._writer.writerow(
+                [
+                    datetime.now().isoformat(timespec="seconds"),
+                    request.row_number,
+                    status,
+                    request.output_format,
+                    f"{duration:.2f}",
+                    archivo,
+                    json.dumps(request.params, ensure_ascii=False),
+                    message,
+                ]
+            )
+            self._results_file.flush()
 
     def close(self) -> None:
         if not self._results_file.closed:
