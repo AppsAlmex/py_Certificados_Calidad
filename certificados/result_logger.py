@@ -35,7 +35,7 @@ _CSV_HEADER = [
 class ResultLogger:
     """Records the outcome of each request. One instance per batch run."""
 
-    def __init__(self, log_dir: str | Path, level: str = "INFO"):
+    def __init__(self, log_dir: str | Path, level: str = "INFO", extra_handlers=None):
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         # Protege la escritura del CSV cuando varios hilos registran a la vez.
@@ -51,14 +51,20 @@ class ResultLogger:
         self._logger = logging.getLogger(f"certificados.{stamp}.{uuid.uuid4().hex[:8]}")
         self._logger.setLevel(getattr(logging, level.upper(), logging.INFO))
         self._logger.propagate = False
+        # Handlers propios (los cerramos nosotros); los extra son de terceros
+        # (p.ej. la GUI para mostrar el log en vivo) y NO los cerramos.
+        self._own_handlers = []
         if not self._logger.handlers:
             fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
             file_handler = logging.FileHandler(self.log_dir / f"ejecucion_{stamp}.log", encoding="utf-8")
             file_handler.setFormatter(fmt)
             stream_handler = logging.StreamHandler()
             stream_handler.setFormatter(fmt)
-            self._logger.addHandler(file_handler)
-            self._logger.addHandler(stream_handler)
+            self._own_handlers = [file_handler, stream_handler]
+            for handler in self._own_handlers:
+                self._logger.addHandler(handler)
+        for handler in (extra_handlers or []):
+            self._logger.addHandler(handler)
 
     # -- events -------------------------------------------------------------
     def log_success(self, result: ReportResult, duration: float) -> None:
@@ -101,9 +107,11 @@ class ResultLogger:
     def close(self) -> None:
         if not self._results_file.closed:
             self._results_file.close()
+        # Quitar todos del logger, pero cerrar solo los propios.
         for handler in list(self._logger.handlers):
-            handler.close()
             self._logger.removeHandler(handler)
+            if handler in self._own_handlers:
+                handler.close()
 
     def __enter__(self) -> "ResultLogger":
         return self

@@ -43,3 +43,26 @@ def test_summary_logged(tmp_path):
     with ResultLogger(tmp_path) as logger:
         logger.summary(BatchSummary(total=3, success=2, failed=1))
     assert list(tmp_path.glob("ejecucion_*.log"))
+
+
+def test_extra_handler_receives_records_and_is_not_closed(tmp_path):
+    import logging
+
+    class Capture(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.records = []
+            self.closed = False
+
+        def emit(self, record):
+            self.records.append(record.getMessage())
+
+        def close(self):
+            self.closed = True
+            super().close()
+
+    handler = Capture()
+    with ResultLogger(tmp_path, extra_handlers=[handler]) as logger:
+        logger.log_success(ReportResult(make_req(), Path("x.pdf"), 1), 0.1)
+    assert any("OK" in m for m in handler.records)
+    assert handler.closed is False  # handler externo no debe cerrarse

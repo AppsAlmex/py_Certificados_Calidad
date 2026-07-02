@@ -8,11 +8,22 @@ propio componente y el núcleo depende de abstracciones, no de implementaciones.
 
 ## 1. Arquitectura
 
+Dos capas separadas: la **presentación** (CLI o GUI) solo consume el **núcleo**
+de negocio; el núcleo no sabe nada de la interfaz.
+
 ```
-CSV ─► CSVReader ─► Validator ─► ReportRequest ─► ReportGateway ─► ResultLogger
-                                                   (OracleReportClient → SOAP)
-              todo orquestado por  BatchProcessor
+  Presentación                         Núcleo de negocio (certificados/)
+  ------------                         ---------------------------------
+  main.py     (CLI)  ─┐
+                      ├─►  CSVReader ─► Validator ─► ReportRequest ─► ReportGateway ─► ResultLogger
+  gui_app.py  (GUI)  ─┘                                              (OracleReportClient → SOAP)
+  gui/ (controller+app)          todo orquestado por BatchProcessor / ConcurrentBatchProcessor
 ```
+
+- **Núcleo** (`certificados/`) — lógica de negocio, sin dependencias de UI.
+- **CLI** (`main.py`) — ejecución por consola.
+- **GUI** (`gui/`) — Tkinter; `controller.py` media contra el núcleo (en un hilo)
+  y `app.py` son solo widgets. Borrar `gui/` no afecta al núcleo ni a la CLI.
 
 | Componente | Archivo | Responsabilidad (SRP) |
 |------------|---------|-----------------------|
@@ -94,7 +105,23 @@ python main.py --csv templates/solicitudes_template.csv
 
 # un solo reporte (ejemplo de reutilización del núcleo)
 python getReport.py
+
+# interfaz gráfica (selector de CSV + Settings + workers)
+python gui_app.py
 ```
+
+### GUI
+
+`python gui_app.py` abre una ventana con dos pestañas:
+
+- **Ejecución** (configuración *al momento*): selector de archivo CSV, reporte a
+  consumir (del catálogo), número de workers y botón Ejecutar. Muestra el log en
+  vivo y un resumen al terminar. El proceso corre en un hilo: la ventana no se
+  congela aunque el reporte tarde.
+- **Settings** (configuración *interna*, persistente): host, service path,
+  timeouts, verify_ssl, carpetas, nivel de log, credenciales, catálogo de
+  reportes y workers por defecto. "Guardar configuración" escribe `config.ini`
+  y `.env` (vía el núcleo, no la GUI).
 
 Los PDF/XLSX se guardan en `output/`; la trazabilidad en `logs/`.
 

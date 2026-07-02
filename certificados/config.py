@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 from .exceptions import ConfigError
 
@@ -175,3 +175,62 @@ def load_settings(
         log_dir=Path(_get(parser, "logging", "log_dir", fallback="logs")),
         log_level=_get(parser, "logging", "log_level", fallback="INFO"),
     )
+
+
+def save_config(
+    config_path: str | os.PathLike = "config.ini",
+    env_path: str | os.PathLike = ".env",
+    *,
+    host: str,
+    service_path: str,
+    timeout: int,
+    connect_timeout: int,
+    verify_ssl: bool,
+    default_report: str,
+    reports: dict,
+    max_workers: int,
+    output_dir: str,
+    log_dir: str,
+    log_level: str,
+    user: str | None = None,
+    password: str | None = None,
+) -> None:
+    """Persistir la configuracion (Settings) a config.ini y credenciales a .env.
+
+    Usada por la GUI para guardar los ajustes internos. La logica de escritura
+    vive en el nucleo (no en la GUI) para mantener la separacion de capas.
+    Los comentarios previos de config.ini no se preservan al reescribir.
+    """
+    if not reports:
+        raise ConfigError("Debe existir al menos un reporte en el catalogo")
+    if default_report not in reports:
+        raise ConfigError(
+            f"default_report '{default_report}' no esta en el catalogo: {', '.join(reports)}"
+        )
+
+    parser = configparser.ConfigParser()
+    parser.optionxform = str
+    parser["service"] = {
+        "host": host,
+        "service_path": service_path,
+        "timeout": str(timeout),
+        "connect_timeout": str(connect_timeout),
+        "verify_ssl": "true" if verify_ssl else "false",
+        "default_report": default_report,
+    }
+    parser["reports"] = {key: value for key, value in reports.items()}
+    parser["batch"] = {"max_workers": str(max_workers)}
+    parser["output"] = {"output_dir": str(output_dir)}
+    parser["logging"] = {"log_dir": str(log_dir), "log_level": log_level}
+
+    with open(config_path, "w", encoding="utf-8") as fh:
+        parser.write(fh)
+
+    # Credenciales solo si se proporcionan (no se muestran/tocan si vienen None).
+    env_file = Path(env_path)
+    if not env_file.exists():
+        env_file.touch()
+    if user is not None:
+        set_key(str(env_file), "CERT_USER", user)
+    if password is not None:
+        set_key(str(env_file), "CERT_PASSWORD", password)

@@ -2,7 +2,7 @@
 
 Public API re-exported for convenience.
 """
-from .config import Settings, load_settings
+from .config import Settings, load_settings, save_config
 from .models import ReportRequest, ReportResult, BatchSummary
 from .exceptions import (
     CertificadoError,
@@ -33,6 +33,7 @@ from .batch import BatchProcessor, ConcurrentBatchProcessor
 __all__ = [
     "Settings",
     "load_settings",
+    "save_config",
     "ReportRequest",
     "ReportResult",
     "BatchSummary",
