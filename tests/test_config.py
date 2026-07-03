@@ -87,6 +87,40 @@ def test_invalid_timeout_raises(tmp_path, monkeypatch):
         load_settings(cfg, env, timeout=0)
 
 
+def _env(tmp_path):
+    return write(tmp_path, "config.ini", CONFIG), write(tmp_path, ".env", "CERT_USER=u\nCERT_PASSWORD=p\n")
+
+
+def test_workers_zero_or_negative_rejected(tmp_path):
+    cfg, env = _env(tmp_path)
+    with pytest.raises(ConfigError, match="workers"):
+        load_settings(cfg, env, workers=0)
+    with pytest.raises(ConfigError, match="workers"):
+        load_settings(cfg, env, workers=-3)
+
+
+def test_workers_max_boundary_ok(tmp_path):
+    from certificados.config import MAX_WORKERS
+    cfg, env = _env(tmp_path)
+    assert load_settings(cfg, env, workers=MAX_WORKERS).max_workers == MAX_WORKERS
+
+
+def test_workers_above_cap_rejected(tmp_path):
+    from certificados.config import MAX_WORKERS
+    cfg, env = _env(tmp_path)
+    with pytest.raises(ConfigError, match="100"):
+        load_settings(cfg, env, workers=MAX_WORKERS + 1)
+
+
+def test_workers_cap_from_env_and_config(tmp_path, monkeypatch):
+    # el tope tambien aplica si se intenta poner por env o config.ini
+    cfg, env = write(tmp_path, "config.ini", CONFIG), write(
+        tmp_path, ".env", "CERT_USER=u\nCERT_PASSWORD=p\nCERT_WORKERS=500\n"
+    )
+    with pytest.raises(ConfigError, match="100"):
+        load_settings(cfg, env)
+
+
 def test_missing_config_file_raises(tmp_path):
     with pytest.raises(ConfigError, match="No se encontro"):
         load_settings(tmp_path / "nope.ini", tmp_path / ".env")

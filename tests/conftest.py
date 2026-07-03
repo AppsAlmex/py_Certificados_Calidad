@@ -11,7 +11,8 @@ from certificados.models import ReportRequest
 def _clean_cert_env(monkeypatch):
     """Isolate tests: load_dotenv no sobrescribe os.environ, asi que limpiamos
     las variables CERT_* antes de cada test para que el .env de cada caso mande."""
-    for var in ("CERT_USER", "CERT_PASSWORD", "CERT_TIMEOUT", "CERT_REPORT"):
+    for var in ("CERT_USER", "CERT_PASSWORD", "CERT_TIMEOUT", "CERT_CONNECT_TIMEOUT",
+                "CERT_REPORT", "CERT_WORKERS"):
         monkeypatch.delenv(var, raising=False)
 
 

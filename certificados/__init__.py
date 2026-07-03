@@ -2,7 +2,7 @@
 
 Public API re-exported for convenience.
 """
-from .config import Settings, load_settings, save_config
+from .config import MAX_WORKERS, MIN_WORKERS, Settings, load_settings, save_config
 from .catalogs import CatalogEntry, load_catalog, parse_valor
 from .models import ReportRequest, ReportResult, BatchSummary
 from .exceptions import (
@@ -35,6 +35,8 @@ __all__ = [
     "Settings",
     "load_settings",
     "save_config",
+    "MAX_WORKERS",
+    "MIN_WORKERS",
     "CatalogEntry",
     "load_catalog",
     "parse_valor",

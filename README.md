@@ -196,6 +196,10 @@ y `requests` es síncrono, se usan **hilos** (`ThreadPoolExecutor`), no `asyncio
 (evitamos reescribir el gateway y romper la integridad).
 
 - `CERT_WORKERS` / `--workers N` / `[batch] max_workers`.
+- **Límite de seguridad (código duro, no configurable):** `1 ≤ workers ≤ 100`.
+  Fuera de rango → `ConfigError`. Constantes `MIN_WORKERS`/`MAX_WORKERS` en
+  `certificados/config.py`; se aplica en `load_settings` y `save_config`, así que
+  ningún medio (config.ini, .env, CLI, GUI) puede superarlo.
 - **`1` = secuencial (comportamiento original, default).**
 - `>1` → `ConcurrentBatchProcessor`: valida secuencial (barato) y ejecuta las
   filas válidas en paralelo. Mismo resultado por fila, solo más rápido.

@@ -15,6 +15,11 @@ from dotenv import load_dotenv, set_key
 
 from .exceptions import ConfigError
 
+# Limite de seguridad de concurrencia. No se configura por ningun
+# medio (ni config.ini, ni .env, ni CLI, ni GUI). workers valido = [1, MAX_WORKERS].
+MAX_WORKERS = 100
+MIN_WORKERS = 1
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -133,8 +138,13 @@ def load_settings(
         max_workers = int(workers_raw)
     except (ValueError, TypeError) as exc:
         raise ConfigError(f"workers invalido: '{workers_raw}'") from exc
-    if max_workers < 1:
-        raise ConfigError(f"workers debe ser >= 1, recibido: {max_workers}")
+    # Limite duro de seguridad (no configurable): 1 <= workers <= MAX_WORKERS.
+    if max_workers < MIN_WORKERS:
+        raise ConfigError(f"workers debe ser >= {MIN_WORKERS}, recibido: {max_workers}")
+    if max_workers > MAX_WORKERS:
+        raise ConfigError(
+            f"workers no puede superar {MAX_WORKERS} (limite de seguridad), recibido: {max_workers}"
+        )
 
     # -- reporte: arg > CERT_REPORT > default_report > primero del catalogo ----
     reports = _resolve_reports(parser)
@@ -206,6 +216,10 @@ def save_config(
     if default_report not in reports:
         raise ConfigError(
             f"default_report '{default_report}' no esta en el catalogo: {', '.join(reports)}"
+        )
+    if not (MIN_WORKERS <= max_workers <= MAX_WORKERS):
+        raise ConfigError(
+            f"max_workers debe estar entre {MIN_WORKERS} y {MAX_WORKERS}, recibido: {max_workers}"
         )
 
     parser = configparser.ConfigParser()

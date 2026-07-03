@@ -11,6 +11,7 @@ import queue
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from certificados import MAX_WORKERS, MIN_WORKERS
 from certificados.catalogs import parse_valor
 from certificados.csv_reader import FORMAT_COLUMN, NAME_COLUMN, PARAM_COLUMNS
 from certificados.models import ReportRequest
@@ -18,7 +19,7 @@ from certificados.models import ReportRequest
 from .controller import CATALOG_FIELDS, BatchController
 
 LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
-FORMATOS_SALIDA = ["pdf", "xml", "xlsx"]
+FORMATOS_SALIDA = ["pdf","xml"]
 CANTIDAD_FIELDS = ("cantidad1", "cantidad2", "cantidad3", "cantidad4")
 CANTIDAD_VALUES = [""] + [str(i) for i in range(1, 11)]
 
@@ -40,7 +41,7 @@ FIELD_LABELS = {
 class CertificadosApp(tk.Tk):
     def __init__(self, config_path: str = "config.ini", env_path: str = ".env"):
         super().__init__()
-        self.title("Certificados de Calidad - Ejecucion masiva")
+        self.title("Certificados de Calidad")
         self.geometry("820x620")
         self.minsize(720, 560)
 
@@ -93,9 +94,8 @@ class CertificadosApp(tk.Tk):
 
         ttk.Label(top, text="Workers (hilos):").grid(row=2, column=0, sticky="w", padx=6, pady=6)
         self._vars["workers"] = tk.IntVar(value=1)
-        ttk.Spinbox(top, from_=1, to=32, textvariable=self._vars["workers"], width=6).grid(
-            row=2, column=1, sticky="w", padx=6
-        )
+        ttk.Spinbox(top, from_=MIN_WORKERS, to=MAX_WORKERS, textvariable=self._vars["workers"],
+                    width=6).grid(row=2, column=1, sticky="w", padx=6)
 
         actions = ttk.Frame(parent)
         actions.pack(fill="x", padx=8)
@@ -292,11 +292,12 @@ class CertificadosApp(tk.Tk):
         )
         self._default_report_combo.grid(row=n + 2, column=1, sticky="ew", padx=6)
 
-        ttk.Label(form, text="Max workers (default):").grid(row=n + 3, column=0, sticky="w", padx=6, pady=4)
-        self._vars["max_workers"] = tk.StringVar(value="1")
-        ttk.Spinbox(form, from_=1, to=32, textvariable=self._vars["max_workers"], width=6).grid(
-            row=n + 3, column=1, sticky="w", padx=6
+        ttk.Label(form, text=f"Max workers (1-{MAX_WORKERS}):").grid(
+            row=n + 3, column=0, sticky="w", padx=6, pady=4
         )
+        self._vars["max_workers"] = tk.StringVar(value="1")
+        ttk.Spinbox(form, from_=MIN_WORKERS, to=MAX_WORKERS, textvariable=self._vars["max_workers"],
+                    width=6).grid(row=n + 3, column=1, sticky="w", padx=6)
 
         cat = ttk.LabelFrame(parent, text="Catalogo de reportes (una linea:  clave = /ruta/reporte.xdo)")
         cat.pack(fill="both", expand=True, padx=8, pady=8)
