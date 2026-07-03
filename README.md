@@ -120,14 +120,22 @@ python gui_app.py
   corre en un hilo: la ventana no se congela aunque el reporte tarde.
 - **Certificado individual**: formulario con los mismos campos del CSV. "Agregar
   a la cola" mete cada certificado a la lista **Certificados en proceso** (con su
-  estado: En cola → Procesando → OK/ERROR/INVALIDO). "Procesar cola" los ejecuta;
-  "Detener", "Quitar seleccionado" y "Limpiar completados" gestionan la lista.
+  estado: En cola → Procesando → OK/ERROR/INVALIDO). Tiene **paridad con el batch**:
+  en "Opciones de envío" se elige el **reporte** y los **workers**; la única
+  diferencia con la ejecución por CSV es el origen de los datos (capturar vs
+  archivo). "Procesar cola" los ejecuta (concurrente si workers > 1); "Detener",
+  "Quitar seleccionado" y "Limpiar completados" gestionan la lista.
   - **Cantidad 1‑4** → combos de 1 a 10.
   - **Formato, Inspector, Planta** → combos "valor - descripción" alimentados por
     CSVs en `catalogos/` (columnas `valor,descripcion`). Edita esos CSV para
     personalizar las opciones; la ruta se configura en `[catalogs]` de
     `config.ini`. Son editables: si un valor no está en la lista, se puede
     escribir. Se guarda solo el `valor` en el parámetro del reporte.
+- **Logs**: lista de ejecuciones previas (más recientes primero) con conteos
+  Total/OK/Error/Inválido. Al seleccionar una, el panel inferior muestra el
+  **detalle por fila** (estado con color, formato, duración, archivo, mensaje) en
+  la sub‑pestaña "Resultados" y el **log de texto completo** en "Log completo".
+  Botón "Refrescar"; se actualiza sola al terminar una ejecución.
 - **Settings** (configuración *interna*, persistente): host, service path,
   timeouts, verify_ssl, carpetas, nivel de log, credenciales, catálogo de
   reportes y workers por defecto. "Guardar configuración" escribe `config.ini`

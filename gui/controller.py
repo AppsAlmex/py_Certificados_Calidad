@@ -11,6 +11,7 @@ import configparser
 import logging
 import queue
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -27,6 +28,7 @@ from certificados import (
     load_settings,
     save_config,
 )
+from certificados.logs import list_runs, read_log_text, read_results
 from certificados.models import BatchSummary
 
 # Campos del formulario que se alimentan de un catalogo valor/descripcion.
@@ -108,6 +110,18 @@ class BatchController:
             result[field] = load_catalog(Path(base) / filename)
         return result
 
+    # -- lectura de logs ------------------------------------------------------
+    def read_runs(self):
+        """Lista de ejecuciones previas (mas recientes primero)."""
+        log_dir = self.read_raw()["log_dir"]
+        return list_runs(log_dir)
+
+    def read_run_results(self, results_path):
+        return read_results(results_path)
+
+    def read_run_log(self, log_path):
+        return read_log_text(log_path)
+
     # -- persistencia (delegada al core) --------------------------------------
     def save(self, **values) -> None:
         save_config(self.config_path, self.env_path, **values)
@@ -150,12 +164,15 @@ class BatchController:
         threading.Thread(target=task, name="batch-run", daemon=True).start()
 
     # -- procesamiento de solicitudes individuales (pestana de 1 en 1) --------
-    def process_requests_async(self, items, out_queue: "queue.Queue") -> None:
+    def process_requests_async(self, items, out_queue: "queue.Queue",
+                               report: str | None = None, workers: int = 1) -> None:
         """Procesa una lista de (item_id, ReportRequest) reportando estado por item.
 
-        Emite ("item", item_id, estado, detalle) por cada uno y ("done", summary)
-        al final. Respeta la cancelacion. Reutiliza el mismo validador/ejecutor
-        que el batch para comportamiento identico.
+        Tiene paridad con el batch: elige ``report`` y ``workers``. Emite
+        ("item", item_id, estado, detalle) por cada uno y ("done", summary) al
+        final. Respeta la cancelacion y reutiliza el mismo validador/ejecutor que
+        el batch para comportamiento identico. La unica diferencia con la
+        ejecucion por CSV es el origen de los datos (formulario vs archivo).
         """
         handler = self._make_handler(out_queue)
         self._cancel_event = threading.Event()
@@ -163,29 +180,51 @@ class BatchController:
 
         def task():
             try:
-                settings = load_settings(self.config_path, self.env_path)
+                settings = load_settings(
+                    self.config_path, self.env_path, report=report or None, workers=workers
+                )
                 validator = build_default_validator()
                 gateway = OracleReportClient(settings)
                 summary = BatchSummary(total=len(items))
                 with ResultLogger(settings.log_dir, settings.log_level, extra_handlers=[handler]) as logger:
+                    # Validacion secuencial (barata); las validas van al ejecutor.
+                    valid = []
                     for item_id, request in items:
-                        if cancel_event.is_set():
-                            summary.cancelled = True
-                            break
-                        out_queue.put(("item", item_id, "Procesando", ""))
                         result = validator.validate(request)
-                        if not result.valid:
+                        if result.valid:
+                            valid.append((item_id, request))
+                        else:
                             detail = "; ".join(str(i) for i in result.issues)
                             logger.log_invalid(request, result.issues, 0.0)
                             out_queue.put(("item", item_id, "INVALIDO", detail))
                             summary.invalid += 1
-                            continue
-                        if execute_and_log(gateway, logger, request):
+
+                    def work(pair):
+                        item_id, request = pair
+                        if cancel_event.is_set():
+                            return item_id, None
+                        out_queue.put(("item", item_id, "Procesando", ""))
+                        return item_id, execute_and_log(gateway, logger, request)
+
+                    def account(item_id, outcome):
+                        if outcome is None:
+                            summary.cancelled = True
+                        elif outcome:
                             out_queue.put(("item", item_id, "OK", ""))
                             summary.success += 1
                         else:
                             out_queue.put(("item", item_id, "ERROR", ""))
                             summary.failed += 1
+
+                    if settings.max_workers > 1:
+                        with ThreadPoolExecutor(max_workers=settings.max_workers) as pool:
+                            for item_id, outcome in pool.map(work, valid):
+                                account(item_id, outcome)
+                    else:
+                        for pair in valid:
+                            item_id, outcome = work(pair)
+                            account(item_id, outcome)
+
                     logger.summary(summary)
                 out_queue.put(("done", summary))
             except Exception as exc:

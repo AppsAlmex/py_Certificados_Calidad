@@ -64,13 +64,16 @@ class CertificadosApp(tk.Tk):
         notebook.pack(fill="both", expand=True, padx=8, pady=8)
         self._exec_tab = ttk.Frame(notebook)
         self._single_tab = ttk.Frame(notebook)
+        self._logs_tab = ttk.Frame(notebook)
         self._settings_tab = ttk.Frame(notebook)
         notebook.add(self._exec_tab, text="  Ejecucion (CSV)  ")
         notebook.add(self._single_tab, text="  Certificado individual  ")
+        notebook.add(self._logs_tab, text="  Logs  ")
         notebook.add(self._settings_tab, text="  Settings  ")
 
         self._build_exec_tab(self._exec_tab)
         self._build_single_tab(self._single_tab)
+        self._build_logs_tab(self._logs_tab)
         self._build_settings_tab(self._settings_tab)
 
         self._load_into_forms()
@@ -172,6 +175,20 @@ class CertificadosApp(tk.Tk):
         self._single_tree.pack(side="left", fill="both", expand=True)
         tree_scroll.pack(side="right", fill="y")
 
+        # Opciones de envio: paridad con la ejecucion por CSV (reporte + workers).
+        options = ttk.LabelFrame(parent, text="Opciones de envio")
+        options.pack(fill="x", padx=8)
+        ttk.Label(options, text="Reporte:").grid(row=0, column=0, sticky="w", padx=6, pady=6)
+        self._single_report_var = tk.StringVar()
+        self._single_report_combo = ttk.Combobox(
+            options, textvariable=self._single_report_var, state="readonly", width=42
+        )
+        self._single_report_combo.grid(row=0, column=1, sticky="w", padx=6)
+        ttk.Label(options, text="Workers:").grid(row=0, column=2, sticky="w", padx=(18, 6))
+        self._single_workers_var = tk.IntVar(value=1)
+        ttk.Spinbox(options, from_=MIN_WORKERS, to=MAX_WORKERS,
+                    textvariable=self._single_workers_var, width=6).grid(row=0, column=3, sticky="w", padx=6)
+
         list_btns = ttk.Frame(parent)
         list_btns.pack(fill="x", padx=8, pady=(0, 8))
         self._process_btn = ttk.Button(list_btns, text="Procesar cola", command=self._on_process_single)
@@ -248,10 +265,124 @@ class CertificadosApp(tk.Tk):
         if not pending:
             messagebox.showinfo("Sin pendientes", "No hay certificados en cola por procesar.")
             return
+        report = self._single_report_var.get()
+        workers = int(self._single_workers_var.get())
         self._active = "single"
         self._set_running(True)
-        self._append_log(f"Procesando {len(pending)} certificado(s) de la cola...")
-        self.controller.process_requests_async(pending, self._queue)
+        self._append_log(
+            f"Procesando {len(pending)} certificado(s) | reporte={report} | workers={workers}"
+        )
+        self.controller.process_requests_async(pending, self._queue, report=report, workers=workers)
+
+    # ------------------------------------------------------------------ LOGS
+    def _build_logs_tab(self, parent: ttk.Frame) -> None:
+        self._runs_by_iid: dict[str, object] = {}
+
+        top = ttk.LabelFrame(parent, text="Ejecuciones (mas recientes primero)")
+        top.pack(fill="both", expand=True, padx=8, pady=(8, 4))
+
+        run_cols = ("fecha", "total", "ok", "error", "invalido")
+        self._runs_tree = ttk.Treeview(top, columns=run_cols, show="headings", height=8)
+        for col, text, width, anchor in (
+            ("fecha", "Fecha", 170, "w"),
+            ("total", "Total", 60, "center"),
+            ("ok", "OK", 60, "center"),
+            ("error", "Error", 60, "center"),
+            ("invalido", "Invalido", 70, "center"),
+        ):
+            self._runs_tree.heading(col, text=text)
+            self._runs_tree.column(col, width=width, anchor=anchor)
+        runs_scroll = ttk.Scrollbar(top, command=self._runs_tree.yview)
+        self._runs_tree.configure(yscrollcommand=runs_scroll.set)
+        self._runs_tree.pack(side="left", fill="both", expand=True)
+        runs_scroll.pack(side="right", fill="y")
+        self._runs_tree.bind("<<TreeviewSelect>>", self._on_run_selected)
+
+        ttk.Button(parent, text="Refrescar", command=self._load_runs).pack(
+            anchor="w", padx=8, pady=(0, 4)
+        )
+
+        detail = ttk.LabelFrame(parent, text="Detalle de la ejecucion")
+        detail.pack(fill="both", expand=True, padx=8, pady=(4, 8))
+        detail_nb = ttk.Notebook(detail)
+        detail_nb.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # Sub-pestana: resultados por fila (estructurado)
+        res_frame = ttk.Frame(detail_nb)
+        detail_nb.add(res_frame, text="Resultados")
+        det_cols = ("fila", "estado", "formato", "duracion_seg", "archivo", "mensaje")
+        self._detail_tree = ttk.Treeview(res_frame, columns=det_cols, show="headings", height=8)
+        for col, text, width in (
+            ("fila", "Fila", 50),
+            ("estado", "Estado", 90),
+            ("formato", "Formato", 70),
+            ("duracion_seg", "Duracion(s)", 90),
+            ("archivo", "Archivo", 220),
+            ("mensaje", "Mensaje", 320),
+        ):
+            self._detail_tree.heading(col, text=text)
+            self._detail_tree.column(col, width=width, anchor="w")
+        det_scroll = ttk.Scrollbar(res_frame, command=self._detail_tree.yview)
+        self._detail_tree.configure(yscrollcommand=det_scroll.set)
+        self._detail_tree.pack(side="left", fill="both", expand=True)
+        det_scroll.pack(side="right", fill="y")
+        # Colores por estado para lectura comoda.
+        self._detail_tree.tag_configure("OK", foreground="#1a7f37")
+        self._detail_tree.tag_configure("ERROR", foreground="#b42318")
+        self._detail_tree.tag_configure("INVALIDO", foreground="#b54708")
+
+        # Sub-pestana: log de texto completo
+        log_frame = ttk.Frame(detail_nb)
+        detail_nb.add(log_frame, text="Log completo")
+        self._log_detail = tk.Text(log_frame, wrap="none", state="disabled")
+        log_scroll = ttk.Scrollbar(log_frame, command=self._log_detail.yview)
+        self._log_detail.configure(yscrollcommand=log_scroll.set)
+        self._log_detail.pack(side="left", fill="both", expand=True)
+        log_scroll.pack(side="right", fill="y")
+
+        self._load_runs()
+
+    def _load_runs(self) -> None:
+        self._runs_tree.delete(*self._runs_tree.get_children())
+        self._runs_by_iid.clear()
+        try:
+            runs = self.controller.read_runs()
+        except Exception as exc:  # pragma: no cover - defensivo
+            self._append_log(f"No se pudieron leer los logs: {exc}")
+            return
+        for run in runs:
+            iid = run.results_path.name
+            self._runs_by_iid[iid] = run
+            self._runs_tree.insert(
+                "", "end", iid=iid,
+                values=(run.fecha, run.total, run.ok, run.error, run.invalido),
+            )
+
+    def _on_run_selected(self, _event=None) -> None:
+        selection = self._runs_tree.selection()
+        if not selection:
+            return
+        run = self._runs_by_iid.get(selection[0])
+        if run is None:
+            return
+
+        self._detail_tree.delete(*self._detail_tree.get_children())
+        for row in self.controller.read_run_results(run.results_path):
+            estado = (row.get("estado") or "").upper()
+            self._detail_tree.insert(
+                "", "end",
+                values=(
+                    row.get("fila", ""), row.get("estado", ""), row.get("formato", ""),
+                    row.get("duracion_seg", ""), row.get("archivo", ""), row.get("mensaje", ""),
+                ),
+                tags=(estado,) if estado in ("OK", "ERROR", "INVALIDO") else (),
+            )
+
+        text = self.controller.read_run_log(run.log_path)
+        self._log_detail.configure(state="normal")
+        self._log_detail.delete("1.0", "end")
+        self._log_detail.insert("end", text)
+        self._log_detail.configure(state="disabled")
 
     # -------------------------------------------------------------- SETTINGS
     def _build_settings_tab(self, parent: ttk.Frame) -> None:
@@ -327,16 +458,19 @@ class CertificadosApp(tk.Tk):
             self._reports_text.insert("end", f"{clave} = {ruta}\n")
 
         self._refresh_report_combos(list(raw["reports"]), raw["default_report"])
-        self._vars["workers"].set(int(raw["max_workers"] or 1))
+        default_workers = int(raw["max_workers"] or 1)
+        self._vars["workers"].set(default_workers)
+        self._single_workers_var.set(default_workers)
 
     def _refresh_report_combos(self, keys: list[str], default: str) -> None:
         self._report_combo["values"] = keys
         self._default_report_combo["values"] = keys
+        self._single_report_combo["values"] = keys
+        chosen = default if default in keys else (keys[0] if keys else "")
+        self._vars["report"].set(chosen)
+        self._single_report_var.set(chosen)
         if default in keys:
-            self._vars["report"].set(default)
             self._vars["default_report"].set(default)
-        elif keys:
-            self._vars["report"].set(keys[0])
 
     def _parse_reports(self) -> dict:
         reports: dict[str, str] = {}
@@ -437,6 +571,7 @@ class CertificadosApp(tk.Tk):
                     self._set_running(False)
                     self._status.set(f"Terminado. {summary}")
                     self._append_log(f"== {summary} ==")
+                    self._load_runs()  # la nueva ejecucion aparece en la pestana Logs
                     messagebox.showinfo("Proceso terminado", str(summary))
                 elif kind == "error":
                     self._set_running(False)

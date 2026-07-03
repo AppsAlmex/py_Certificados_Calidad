@@ -4,6 +4,7 @@ Public API re-exported for convenience.
 """
 from .config import MAX_WORKERS, MIN_WORKERS, Settings, load_settings, save_config
 from .catalogs import CatalogEntry, load_catalog, parse_valor
+from .logs import LogRun, list_runs, read_log_text, read_results
 from .models import ReportRequest, ReportResult, BatchSummary
 from .exceptions import (
     CertificadoError,
@@ -40,6 +41,10 @@ __all__ = [
     "CatalogEntry",
     "load_catalog",
     "parse_valor",
+    "LogRun",
+    "list_runs",
+    "read_log_text",
+    "read_results",
     "ReportRequest",
     "ReportResult",
     "BatchSummary",

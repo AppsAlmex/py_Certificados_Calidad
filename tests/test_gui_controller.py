@@ -125,6 +125,51 @@ def test_process_requests_async(tmp_path, monkeypatch, settings):
     assert summary.invalid == 1
 
 
+def test_process_requests_concurrent(tmp_path, monkeypatch, settings):
+    import dataclasses
+    import threading
+
+    # load_settings respeta el workers pedido (paridad con el batch).
+    monkeypatch.setattr(
+        ctrl_mod, "load_settings",
+        lambda *a, **k: dataclasses.replace(settings, max_workers=k.get("workers") or 1),
+    )
+
+    lock = threading.Lock()
+    state = {"active": 0, "max": 0}
+
+    class FakeClient:
+        def __init__(self, _settings):
+            pass
+
+        def run_report(self, request):
+            with lock:
+                state["active"] += 1
+                state["max"] = max(state["max"], state["active"])
+            time.sleep(0.1)
+            with lock:
+                state["active"] -= 1
+            return ReportResult(request, Path("x.pdf"), 5)
+
+    monkeypatch.setattr(ctrl_mod, "OracleReportClient", FakeClient)
+
+    def make(n):
+        return ReportRequest(
+            n, {"P_EMBARQUE": str(n), "P_FORMATO": "1", "P_INSPECTOR": "3",
+                "P_PLANTA_PROD": "P", "P_TANQUE": "T", "P_CANTIDAD1": "1"},
+            output_format="pdf",
+        )
+
+    items = [(str(n), make(n)) for n in range(1, 5)]
+    q: "queue.Queue" = queue.Queue()
+    BatchController().process_requests_async(items, q, report="alpha", workers=4)
+    messages = _drain_until_done(q)
+
+    done = [m for m in messages if m[0] == "done"][0]
+    assert done[1].success == 4
+    assert state["max"] >= 2  # corrieron en paralelo
+
+
 def test_cancel_before_run_is_noop():
     # cancel() sin proceso activo no debe fallar.
     BatchController().cancel()
