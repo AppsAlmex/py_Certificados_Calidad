@@ -6,6 +6,7 @@ output/
 logs/
 *.pdf
 *.xlsx
+*.csv
 
 # Python
 __pycache__/

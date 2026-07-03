@@ -3,6 +3,7 @@
 Public API re-exported for convenience.
 """
 from .config import Settings, load_settings, save_config
+from .catalogs import CatalogEntry, load_catalog, parse_valor
 from .models import ReportRequest, ReportResult, BatchSummary
 from .exceptions import (
     CertificadoError,
@@ -28,12 +29,15 @@ from .validators import (
 )
 from .executor import ReportGateway, OracleReportClient
 from .result_logger import ResultLogger
-from .batch import BatchProcessor, ConcurrentBatchProcessor
+from .batch import BatchProcessor, ConcurrentBatchProcessor, execute_and_log
 
 __all__ = [
     "Settings",
     "load_settings",
     "save_config",
+    "CatalogEntry",
+    "load_catalog",
+    "parse_valor",
     "ReportRequest",
     "ReportResult",
     "BatchSummary",
@@ -60,4 +64,5 @@ __all__ = [
     "ResultLogger",
     "BatchProcessor",
     "ConcurrentBatchProcessor",
+    "execute_and_log",
 ]

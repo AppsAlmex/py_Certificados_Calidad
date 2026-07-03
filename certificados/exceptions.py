@@ -17,6 +17,10 @@ class CSVReadError(CertificadoError):
     """The CSV file cannot be opened or its headers are invalid."""
 
 
+class CatalogError(CertificadoError):
+    """A value/description catalog CSV is malformed."""
+
+
 class ValidationFailedError(CertificadoError):
     """A request failed validation. Carries the list of issues."""
 

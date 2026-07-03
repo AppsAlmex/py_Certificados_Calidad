@@ -112,16 +112,31 @@ python gui_app.py
 
 ### GUI
 
-`python gui_app.py` abre una ventana con dos pestañas:
+`python gui_app.py` abre una ventana con tres pestañas:
 
-- **Ejecución** (configuración *al momento*): selector de archivo CSV, reporte a
-  consumir (del catálogo), número de workers y botón Ejecutar. Muestra el log en
-  vivo y un resumen al terminar. El proceso corre en un hilo: la ventana no se
-  congela aunque el reporte tarde.
+- **Ejecución (CSV)** (configuración *al momento*): selector de archivo CSV,
+  reporte a consumir (del catálogo), número de workers, botón **Ejecutar** y
+  botón **Detener**. Muestra el log en vivo y un resumen al terminar. El proceso
+  corre en un hilo: la ventana no se congela aunque el reporte tarde.
+- **Certificado individual**: formulario con los mismos campos del CSV. "Agregar
+  a la cola" mete cada certificado a la lista **Certificados en proceso** (con su
+  estado: En cola → Procesando → OK/ERROR/INVALIDO). "Procesar cola" los ejecuta;
+  "Detener", "Quitar seleccionado" y "Limpiar completados" gestionan la lista.
+  - **Cantidad 1‑4** → combos de 1 a 10.
+  - **Formato, Inspector, Planta** → combos "valor - descripción" alimentados por
+    CSVs en `catalogos/` (columnas `valor,descripcion`). Edita esos CSV para
+    personalizar las opciones; la ruta se configura en `[catalogs]` de
+    `config.ini`. Son editables: si un valor no está en la lista, se puede
+    escribir. Se guarda solo el `valor` en el parámetro del reporte.
 - **Settings** (configuración *interna*, persistente): host, service path,
   timeouts, verify_ssl, carpetas, nivel de log, credenciales, catálogo de
   reportes y workers por defecto. "Guardar configuración" escribe `config.ini`
   y `.env` (vía el núcleo, no la GUI).
+
+**Detener (cancelación cooperativa):** para nuevas peticiones y no lanza más; la
+petición **en curso termina** (un único reporte de 70 min no se aborta a la
+fuerza — Python no puede matar el request bloqueante sin riesgo). El resumen
+final marca `(cancelado)`.
 
 Los PDF/XLSX se guardan en `output/`; la trazabilidad en `logs/`.
 

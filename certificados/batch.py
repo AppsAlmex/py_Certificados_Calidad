@@ -19,11 +19,12 @@ from .result_logger import ResultLogger
 from .validators import RequestValidator
 
 
-def _execute_and_log(gateway, logger: ResultLogger, request) -> bool:
+def execute_and_log(gateway, logger: ResultLogger, request) -> bool:
     """Ejecuta una solicitud ya validada y registra el resultado.
 
-    Compartido por el procesador secuencial y el concurrente para que ambos
-    tengan EXACTAMENTE el mismo comportamiento por fila. Devuelve True si OK.
+    Compartido por el procesador secuencial, el concurrente y el procesamiento
+    individual de la GUI, para que todos tengan EXACTAMENTE el mismo
+    comportamiento por fila. Devuelve True si OK.
     """
     start = time.perf_counter()
     try:
@@ -38,6 +39,10 @@ def _execute_and_log(gateway, logger: ResultLogger, request) -> bool:
         return False
 
 
+def _cancelled(cancel_event) -> bool:
+    return cancel_event is not None and cancel_event.is_set()
+
+
 class BatchProcessor:
     def __init__(self, reader, validator: RequestValidator, gateway, logger: ResultLogger):
         self._reader = reader
@@ -45,12 +50,17 @@ class BatchProcessor:
         self._gateway = gateway
         self._logger = logger
 
-    def run(self) -> BatchSummary:
+    def run(self, cancel_event=None) -> BatchSummary:
         # A read error is fatal (no rows to process) and propagates to caller.
         requests = self._reader.read()
         summary = BatchSummary(total=len(requests))
 
         for request in requests:
+            # Cancelacion cooperativa: se detiene antes de lanzar la siguiente fila.
+            if _cancelled(cancel_event):
+                summary.cancelled = True
+                break
+
             start = time.perf_counter()
             result = self._validator.validate(request)
             if not result.valid:
@@ -58,7 +68,7 @@ class BatchProcessor:
                 summary.invalid += 1
                 continue
 
-            if _execute_and_log(self._gateway, self._logger, request):
+            if execute_and_log(self._gateway, self._logger, request):
                 summary.success += 1
             else:
                 summary.failed += 1
@@ -84,7 +94,7 @@ class ConcurrentBatchProcessor:
         self._logger = logger
         self._max_workers = max(1, max_workers)
 
-    def run(self) -> BatchSummary:
+    def run(self, cancel_event=None) -> BatchSummary:
         requests = self._reader.read()
         summary = BatchSummary(total=len(requests))
 
@@ -97,13 +107,19 @@ class ConcurrentBatchProcessor:
                 self._logger.log_invalid(request, result.issues, 0.0)
                 summary.invalid += 1
 
+        def guarded(req):
+            # Tareas aun no iniciadas se saltan si ya se cancelo; las en vuelo terminan.
+            if _cancelled(cancel_event):
+                return None
+            return execute_and_log(self._gateway, self._logger, req)
+
         with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
-            futures = {
-                pool.submit(_execute_and_log, self._gateway, self._logger, req): req
-                for req in valid
-            }
+            futures = {pool.submit(guarded, req): req for req in valid}
             for future in as_completed(futures):
-                if future.result():
+                outcome = future.result()
+                if outcome is None:
+                    summary.cancelled = True
+                elif outcome:
                     summary.success += 1
                 else:
                     summary.failed += 1

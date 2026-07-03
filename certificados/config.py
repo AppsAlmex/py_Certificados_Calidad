@@ -210,6 +210,8 @@ def save_config(
 
     parser = configparser.ConfigParser()
     parser.optionxform = str
+    # Leer lo existente para preservar secciones que la GUI no edita (p.ej. [catalogs]).
+    parser.read(config_path, encoding="utf-8")
     parser["service"] = {
         "host": host,
         "service_path": service_path,

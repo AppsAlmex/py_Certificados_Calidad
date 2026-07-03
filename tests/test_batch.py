@@ -147,6 +147,49 @@ def test_concurrent_invalid_skipped(tmp_path):
     assert 2 not in gateway.calls  # invalida nunca llega al gateway
 
 
+class CancelAfterGateway:
+    """Marca el evento de cancelacion tras N llamadas."""
+
+    def __init__(self, event, after=1):
+        self.event = event
+        self.after = after
+        self.calls = []
+
+    def run_report(self, request):
+        self.calls.append(request.row_number)
+        if len(self.calls) >= self.after:
+            self.event.set()
+        from pathlib import Path
+        return ReportResult(request, Path("x.pdf"), 1)
+
+
+def test_sequential_cancellation(tmp_path):
+    ev = threading.Event()
+    reqs = [make_req(r) for r in range(2, 7)]
+    gateway = CancelAfterGateway(ev, after=2)
+    with ResultLogger(tmp_path) as logger:
+        summary = BatchProcessor(
+            FakeReader(reqs), build_default_validator(), gateway, logger
+        ).run(cancel_event=ev)
+    assert summary.cancelled is True
+    assert summary.success == 2  # procesa 2, cancela antes de la 3a
+    assert len(gateway.calls) == 2
+
+
+def test_concurrent_cancellation_pre_set(tmp_path):
+    ev = threading.Event()
+    ev.set()
+    reqs = [make_req(r) for r in range(2, 6)]
+    gateway = FakeGateway()
+    with ResultLogger(tmp_path) as logger:
+        summary = ConcurrentBatchProcessor(
+            FakeReader(reqs), build_default_validator(), gateway, logger, max_workers=2
+        ).run(cancel_event=ev)
+    assert summary.cancelled is True
+    assert summary.success == 0
+    assert gateway.calls == []  # ninguna llega a ejecutarse
+
+
 def test_concurrent_logs_all_rows(tmp_path):
     reqs = [make_req(r) for r in range(2, 12)]  # 10 filas
     gateway = SlowGateway(delay=0.01)

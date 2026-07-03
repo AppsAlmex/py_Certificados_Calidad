@@ -68,13 +68,15 @@ class BatchSummary:
     success: int = 0
     invalid: int = 0
     failed: int = 0
+    cancelled: bool = False
 
     @property
     def processed_ok(self) -> bool:
         return self.failed == 0 and self.invalid == 0
 
     def __str__(self) -> str:
-        return (
+        base = (
             f"total={self.total} ok={self.success} "
             f"invalidos={self.invalid} fallidos={self.failed}"
         )
+        return base + " (cancelado)" if self.cancelled else base

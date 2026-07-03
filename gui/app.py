@@ -11,9 +11,30 @@ import queue
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from .controller import BatchController
+from certificados.catalogs import parse_valor
+from certificados.csv_reader import FORMAT_COLUMN, NAME_COLUMN, PARAM_COLUMNS
+from certificados.models import ReportRequest
+
+from .controller import CATALOG_FIELDS, BatchController
 
 LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
+FORMATOS_SALIDA = ["pdf", "xml", "xlsx"]
+CANTIDAD_FIELDS = ("cantidad1", "cantidad2", "cantidad3", "cantidad4")
+CANTIDAD_VALUES = [""] + [str(i) for i in range(1, 11)]
+
+# Etiquetas legibles para el formulario individual (columna CSV -> label).
+FIELD_LABELS = {
+    "embarque": "Embarque",
+    "formato": "Formato (P_FORMATO)",
+    "inspector": "Inspector",
+    "observaciones": "Observaciones",
+    "planta_prod": "Planta produccion",
+    "tanque": "Tanque",
+    "sello1": "Sello 1", "cantidad1": "Cantidad 1",
+    "sello2": "Sello 2", "cantidad2": "Cantidad 2",
+    "sello3": "Sello 3", "cantidad3": "Cantidad 3",
+    "sello4": "Sello 4", "cantidad4": "Cantidad 4",
+}
 
 
 class CertificadosApp(tk.Tk):
@@ -26,16 +47,29 @@ class CertificadosApp(tk.Tk):
         self.controller = BatchController(config_path, env_path)
         self._queue: "queue.Queue" = queue.Queue()
         self._running = False
+        self._active = None  # "batch" | "single" | None
+
+        # estado de la pestana individual
+        self._single_vars: dict[str, tk.StringVar] = {}
+        self._queued: dict[str, ReportRequest] = {}
+        self._single_next_id = 1
+        try:
+            self._catalogs = self.controller.read_catalogs()
+        except Exception:
+            self._catalogs = {}
 
         self._vars: dict[str, tk.Variable] = {}
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=8, pady=8)
         self._exec_tab = ttk.Frame(notebook)
+        self._single_tab = ttk.Frame(notebook)
         self._settings_tab = ttk.Frame(notebook)
-        notebook.add(self._exec_tab, text="  Ejecucion  ")
+        notebook.add(self._exec_tab, text="  Ejecucion (CSV)  ")
+        notebook.add(self._single_tab, text="  Certificado individual  ")
         notebook.add(self._settings_tab, text="  Settings  ")
 
         self._build_exec_tab(self._exec_tab)
+        self._build_single_tab(self._single_tab)
         self._build_settings_tab(self._settings_tab)
 
         self._load_into_forms()
@@ -67,6 +101,8 @@ class CertificadosApp(tk.Tk):
         actions.pack(fill="x", padx=8)
         self._run_btn = ttk.Button(actions, text="Ejecutar", command=self._on_run)
         self._run_btn.pack(side="left")
+        self._stop_btn = ttk.Button(actions, text="Detener", command=self._on_stop, state="disabled")
+        self._stop_btn.pack(side="left", padx=(6, 0))
         self._progress = ttk.Progressbar(actions, mode="indeterminate")
         self._progress.pack(side="left", fill="x", expand=True, padx=10)
 
@@ -82,6 +118,140 @@ class CertificadosApp(tk.Tk):
         ttk.Label(parent, textvariable=self._status, relief="sunken", anchor="w").pack(
             fill="x", side="bottom"
         )
+
+    # ---------------------------------------------------------------- SINGLE
+    def _build_single_tab(self, parent: ttk.Frame) -> None:
+        form = ttk.LabelFrame(parent, text="Datos del certificado (mismos campos del CSV)")
+        form.pack(fill="x", padx=8, pady=8)
+        for c in (1, 3):
+            form.columnconfigure(c, weight=1)
+
+        # Campos de parametros en dos columnas de pares (label, widget).
+        cols = list(PARAM_COLUMNS.keys())
+        for i, col in enumerate(cols):
+            var = tk.StringVar()
+            self._single_vars[col] = var
+            r, block = divmod(i, 2)
+            ttk.Label(form, text=FIELD_LABELS.get(col, col) + ":").grid(
+                row=r, column=block * 2, sticky="w", padx=6, pady=3
+            )
+            widget = self._make_field_widget(form, col, var)
+            widget.grid(row=r, column=block * 2 + 1, sticky="ew", padx=6, pady=3)
+
+        base = (len(cols) + 1) // 2
+        ttk.Label(form, text="Formato salida:").grid(row=base, column=0, sticky="w", padx=6, pady=3)
+        self._single_vars[FORMAT_COLUMN] = tk.StringVar(value="pdf")
+        ttk.Combobox(form, textvariable=self._single_vars[FORMAT_COLUMN], values=FORMATOS_SALIDA,
+                     state="readonly", width=10).grid(row=base, column=1, sticky="w", padx=6, pady=3)
+        ttk.Label(form, text="Nombre archivo:").grid(row=base, column=2, sticky="w", padx=6, pady=3)
+        self._single_vars[NAME_COLUMN] = tk.StringVar()
+        ttk.Entry(form, textvariable=self._single_vars[NAME_COLUMN]).grid(
+            row=base, column=3, sticky="ew", padx=6, pady=3
+        )
+
+        form_btns = ttk.Frame(parent)
+        form_btns.pack(fill="x", padx=8)
+        ttk.Button(form_btns, text="Agregar a la cola", command=self._on_add_single).pack(side="left")
+        ttk.Button(form_btns, text="Limpiar formulario", command=self._clear_single_form).pack(
+            side="left", padx=6
+        )
+
+        list_frame = ttk.LabelFrame(parent, text="Certificados en proceso")
+        list_frame.pack(fill="both", expand=True, padx=8, pady=8)
+        columns = ("embarque", "formato", "estado")
+        self._single_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=8)
+        for col, text, width in (
+            ("embarque", "Embarque", 160),
+            ("formato", "Formato", 90),
+            ("estado", "Estado", 140),
+        ):
+            self._single_tree.heading(col, text=text)
+            self._single_tree.column(col, width=width, anchor="w")
+        tree_scroll = ttk.Scrollbar(list_frame, command=self._single_tree.yview)
+        self._single_tree.configure(yscrollcommand=tree_scroll.set)
+        self._single_tree.pack(side="left", fill="both", expand=True)
+        tree_scroll.pack(side="right", fill="y")
+
+        list_btns = ttk.Frame(parent)
+        list_btns.pack(fill="x", padx=8, pady=(0, 8))
+        self._process_btn = ttk.Button(list_btns, text="Procesar cola", command=self._on_process_single)
+        self._process_btn.pack(side="left")
+        self._single_stop_btn = ttk.Button(
+            list_btns, text="Detener", command=self._on_stop, state="disabled"
+        )
+        self._single_stop_btn.pack(side="left", padx=6)
+        ttk.Button(list_btns, text="Quitar seleccionado", command=self._on_remove_single).pack(side="left")
+        ttk.Button(list_btns, text="Limpiar completados", command=self._clear_done).pack(side="left", padx=6)
+
+    def _make_field_widget(self, parent, col, var):
+        """Elige el widget segun el tipo de campo (combo cantidad, combo catalogo, entry)."""
+        if col in CANTIDAD_FIELDS:
+            return ttk.Combobox(parent, textvariable=var, values=CANTIDAD_VALUES,
+                                state="readonly", width=8)
+        if col in CATALOG_FIELDS:
+            entries = self._catalogs.get(col, [])
+            # editable: si el catalogo no cubre un valor, el usuario puede escribirlo.
+            return ttk.Combobox(parent, textvariable=var, values=[e.display for e in entries])
+        return ttk.Entry(parent, textvariable=var)
+
+    def _clear_single_form(self) -> None:
+        for col in PARAM_COLUMNS:
+            self._single_vars[col].set("")
+        self._single_vars[FORMAT_COLUMN].set("pdf")
+        self._single_vars[NAME_COLUMN].set("")
+
+    def _on_add_single(self) -> None:
+        embarque = self._single_vars["embarque"].get().strip()
+        if not embarque:
+            messagebox.showwarning("Falta dato", "El Embarque es obligatorio.")
+            return
+        params = {}
+        for col, pkey in PARAM_COLUMNS.items():
+            raw = self._single_vars[col].get()
+            # En combos de catalogo el texto es "valor - descripcion"; guardamos el valor.
+            params[pkey] = parse_valor(raw) if col in CATALOG_FIELDS else raw.strip()
+        output_format = self._single_vars[FORMAT_COLUMN].get().strip().lower() or "pdf"
+        output_name = self._single_vars[NAME_COLUMN].get().strip() or None
+
+        item_id = str(self._single_next_id)
+        self._single_next_id += 1
+        request = ReportRequest(
+            row_number=int(item_id), params=params,
+            output_format=output_format, output_name=output_name,
+        )
+        self._queued[item_id] = request
+        self._single_tree.insert("", "end", iid=item_id, values=(embarque, output_format, "En cola"))
+        self._clear_single_form()
+
+    def _on_remove_single(self) -> None:
+        if self._running:
+            return
+        for iid in self._single_tree.selection():
+            self._single_tree.delete(iid)
+            self._queued.pop(iid, None)
+
+    def _clear_done(self) -> None:
+        if self._running:
+            return
+        for iid in list(self._queued):
+            if self._single_tree.set(iid, "estado") == "OK":
+                self._single_tree.delete(iid)
+                self._queued.pop(iid, None)
+
+    def _on_process_single(self) -> None:
+        if self._running:
+            return
+        pending = [
+            (iid, req) for iid, req in self._queued.items()
+            if self._single_tree.set(iid, "estado") != "OK"
+        ]
+        if not pending:
+            messagebox.showinfo("Sin pendientes", "No hay certificados en cola por procesar.")
+            return
+        self._active = "single"
+        self._set_running(True)
+        self._append_log(f"Procesando {len(pending)} certificado(s) de la cola...")
+        self.controller.process_requests_async(pending, self._queue)
 
     # -------------------------------------------------------------- SETTINGS
     def _build_settings_tab(self, parent: ttk.Frame) -> None:
@@ -227,6 +397,7 @@ class CertificadosApp(tk.Tk):
             messagebox.showwarning("Falta CSV", "Selecciona un archivo CSV primero.")
             return
 
+        self._active = "batch"
         self._set_running(True)
         self._append_log(f"Iniciando: {csv_path} | reporte={self._vars['report'].get()} "
                          f"| workers={self._vars['workers'].get()}")
@@ -237,34 +408,57 @@ class CertificadosApp(tk.Tk):
             self._queue,
         )
 
+    def _on_stop(self) -> None:
+        if not self._running:
+            return
+        self.controller.cancel()
+        self._status.set("Deteniendo... (la peticion en curso termina; no se lanzan mas)")
+        self._append_log("Cancelacion solicitada por el usuario.")
+        self._stop_btn.configure(state="disabled")
+        self._single_stop_btn.configure(state="disabled")
+
     # ---------------------------------------------------------------- LOOP
     def _poll_queue(self) -> None:
         try:
             while True:
-                kind, payload = self._queue.get_nowait()
+                message = self._queue.get_nowait()
+                kind = message[0]
                 if kind == "log":
-                    self._append_log(payload)
+                    self._append_log(message[1])
+                elif kind == "item":
+                    _, item_id, estado, detalle = message
+                    if self._single_tree.exists(item_id):
+                        self._single_tree.set(item_id, "estado", estado)
+                    if detalle:
+                        self._append_log(f"[{item_id}] {estado}: {detalle}")
                 elif kind == "done":
+                    summary = message[1]
                     self._set_running(False)
-                    self._status.set(f"Terminado. {payload}")
-                    self._append_log(f"== {payload} ==")
-                    messagebox.showinfo("Proceso terminado", str(payload))
+                    self._status.set(f"Terminado. {summary}")
+                    self._append_log(f"== {summary} ==")
+                    messagebox.showinfo("Proceso terminado", str(summary))
                 elif kind == "error":
                     self._set_running(False)
-                    self._status.set(f"Error: {payload}")
-                    self._append_log(f"ERROR: {payload}")
-                    messagebox.showerror("Error", str(payload))
+                    self._status.set(f"Error: {message[1]}")
+                    self._append_log(f"ERROR: {message[1]}")
+                    messagebox.showerror("Error", str(message[1]))
         except queue.Empty:
             pass
         self.after(100, self._poll_queue)
 
     def _set_running(self, running: bool) -> None:
         self._running = running
-        self._run_btn.configure(state="disabled" if running else "normal")
+        run_state = "disabled" if running else "normal"
+        stop_state = "normal" if running else "disabled"
+        self._run_btn.configure(state=run_state)
+        self._process_btn.configure(state=run_state)
+        self._stop_btn.configure(state=stop_state)
+        self._single_stop_btn.configure(state=stop_state)
         if running:
             self._progress.start(12)
             self._status.set("Procesando...")
         else:
+            self._active = None
             self._progress.stop()
 
     def _append_log(self, text: str) -> None:
