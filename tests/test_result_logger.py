@@ -45,6 +45,18 @@ def test_summary_logged(tmp_path):
     assert list(tmp_path.glob("ejecucion_*.log"))
 
 
+def test_context_recorded_in_results_and_log(tmp_path):
+    context = {"reporte": "REP_X", "workers": 4, "timeout": 300}
+    with ResultLogger(tmp_path, context=context) as logger:
+        logger.log_success(ReportResult(make_req(), Path("x.pdf"), 1), 0.1)
+    results = list(tmp_path.glob("resultados_*.csv"))[0].read_text(encoding="utf-8")
+    assert "reporte" in results.splitlines()[0]  # columna en header
+    assert "REP_X" in results                     # valor en la fila
+    log_text = list(tmp_path.glob("ejecucion_*.log"))[0].read_text(encoding="utf-8")
+    assert "Inicio de ejecucion" in log_text
+    assert "reporte=REP_X" in log_text
+
+
 def test_extra_handler_receives_records_and_is_not_closed(tmp_path):
     import logging
 

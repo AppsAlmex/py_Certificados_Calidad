@@ -24,6 +24,7 @@ class LogRun:
 
     results_path: Path
     fecha: str
+    reporte: str = ""
     total: int = 0
     ok: int = 0
     error: int = 0
@@ -69,14 +70,18 @@ def list_runs(log_dir: str | Path) -> List[LogRun]:
     for results_file in sorted(directory.glob(f"{RESULT_PREFIX}*.csv"), reverse=True):
         rows = read_results(results_file)
         counts = {"OK": 0, "ERROR": 0, "INVALIDO": 0}
+        reporte = ""
         for row in rows:
             estado = (row.get("estado") or "").strip().upper()
             if estado in counts:
                 counts[estado] += 1
+            if not reporte:
+                reporte = (row.get("reporte") or "").strip()
         runs.append(
             LogRun(
                 results_path=results_file,
                 fecha=_format_stamp(results_file),
+                reporte=reporte,
                 total=len(rows),
                 ok=counts["OK"],
                 error=counts["ERROR"],

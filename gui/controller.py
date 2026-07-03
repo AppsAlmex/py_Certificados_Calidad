@@ -50,6 +50,16 @@ def _as_bool(value: str) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _run_context(settings, origen: str) -> dict:
+    """Contexto de la corrida que se guarda en los logs (para saber que se uso)."""
+    return {
+        "reporte": settings.report_key,
+        "workers": settings.max_workers,
+        "timeout": settings.timeout,
+        "origen": origen,
+    }
+
+
 class BatchController:
     """Fachada del nucleo para la GUI."""
 
@@ -149,7 +159,9 @@ class BatchController:
                 reader = CSVReader(csv_path)
                 validator = build_default_validator()
                 gateway = OracleReportClient(settings)
-                with ResultLogger(settings.log_dir, settings.log_level, extra_handlers=[handler]) as logger:
+                context = _run_context(settings, origen=f"CSV:{csv_path}")
+                with ResultLogger(settings.log_dir, settings.log_level,
+                                  extra_handlers=[handler], context=context) as logger:
                     if settings.max_workers > 1:
                         processor = ConcurrentBatchProcessor(
                             reader, validator, gateway, logger, max_workers=settings.max_workers
@@ -186,7 +198,9 @@ class BatchController:
                 validator = build_default_validator()
                 gateway = OracleReportClient(settings)
                 summary = BatchSummary(total=len(items))
-                with ResultLogger(settings.log_dir, settings.log_level, extra_handlers=[handler]) as logger:
+                context = _run_context(settings, origen="Formulario individual")
+                with ResultLogger(settings.log_dir, settings.log_level,
+                                  extra_handlers=[handler], context=context) as logger:
                     # Validacion secuencial (barata); las validas van al ejecutor.
                     valid = []
                     for item_id, request in items:

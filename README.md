@@ -131,8 +131,9 @@ python gui_app.py
     personalizar las opciones; la ruta se configura en `[catalogs]` de
     `config.ini`. Son editables: si un valor no está en la lista, se puede
     escribir. Se guarda solo el `valor` en el parámetro del reporte.
-- **Logs**: lista de ejecuciones previas (más recientes primero) con conteos
-  Total/OK/Error/Inválido. Al seleccionar una, el panel inferior muestra el
+- **Logs**: lista de ejecuciones previas (más recientes primero) con el
+  **reporte usado** y conteos Total/OK/Error/Inválido. Al seleccionar una, el
+  panel inferior muestra el
   **detalle por fila** (estado con color, formato, duración, archivo, mensaje) en
   la sub‑pestaña "Resultados" y el **log de texto completo** en "Log completo".
   Botón "Refrescar"; se actualiza sola al terminar una ejecución.

@@ -51,7 +51,13 @@ def main(argv=None) -> int:
     validator = build_default_validator()
     gateway = OracleReportClient(settings)
 
-    with ResultLogger(settings.log_dir, settings.log_level) as logger:
+    context = {
+        "reporte": settings.report_key,
+        "workers": settings.max_workers,
+        "timeout": settings.timeout,
+        "origen": f"CSV:{args.csv}",
+    }
+    with ResultLogger(settings.log_dir, settings.log_level, context=context) as logger:
         # 1 worker = secuencial (comportamiento original); >1 = concurrente.
         if settings.max_workers > 1:
             processor = ConcurrentBatchProcessor(

@@ -1,12 +1,12 @@
 from certificados.logs import LogRun, list_runs, read_log_text, read_results
 
-HEADER = "timestamp,fila,estado,formato,duracion_seg,archivo,parametros,mensaje\n"
+HEADER = "timestamp,reporte,fila,estado,formato,duracion_seg,archivo,parametros,mensaje\n"
 
 
-def _write_run(log_dir, stamp, rows):
+def _write_run(log_dir, stamp, rows, reporte="REP_A"):
     results = log_dir / f"resultados_{stamp}.csv"
     body = HEADER + "".join(
-        f"2026-01-01T00:00:00,{fila},{estado},pdf,1.0,x.pdf,{{}},{msg}\n"
+        f"2026-01-01T00:00:00,{reporte},{fila},{estado},pdf,1.0,x.pdf,{{}},{msg}\n"
         for fila, estado, msg in rows
     )
     results.write_text(body, encoding="utf-8")
@@ -25,6 +25,7 @@ def test_list_runs_counts_and_order(tmp_path):
     assert newest.ok == 2
     assert newest.invalido == 1
     assert newest.error == 0
+    assert newest.reporte == "REP_A"  # reporte usado, leido del CSV
 
 
 def test_log_path_derived(tmp_path):

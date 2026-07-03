@@ -281,14 +281,15 @@ class CertificadosApp(tk.Tk):
         top = ttk.LabelFrame(parent, text="Ejecuciones (mas recientes primero)")
         top.pack(fill="both", expand=True, padx=8, pady=(8, 4))
 
-        run_cols = ("fecha", "total", "ok", "error", "invalido")
+        run_cols = ("fecha", "reporte", "total", "ok", "error", "invalido")
         self._runs_tree = ttk.Treeview(top, columns=run_cols, show="headings", height=8)
         for col, text, width, anchor in (
-            ("fecha", "Fecha", 170, "w"),
-            ("total", "Total", 60, "center"),
-            ("ok", "OK", 60, "center"),
-            ("error", "Error", 60, "center"),
-            ("invalido", "Invalido", 70, "center"),
+            ("fecha", "Fecha", 150, "w"),
+            ("reporte", "Reporte", 240, "w"),
+            ("total", "Total", 55, "center"),
+            ("ok", "OK", 50, "center"),
+            ("error", "Error", 55, "center"),
+            ("invalido", "Invalido", 65, "center"),
         ):
             self._runs_tree.heading(col, text=text)
             self._runs_tree.column(col, width=width, anchor=anchor)
@@ -310,15 +311,16 @@ class CertificadosApp(tk.Tk):
         # Sub-pestana: resultados por fila (estructurado)
         res_frame = ttk.Frame(detail_nb)
         detail_nb.add(res_frame, text="Resultados")
-        det_cols = ("fila", "estado", "formato", "duracion_seg", "archivo", "mensaje")
+        det_cols = ("fila", "reporte", "estado", "formato", "duracion_seg", "archivo", "mensaje")
         self._detail_tree = ttk.Treeview(res_frame, columns=det_cols, show="headings", height=8)
         for col, text, width in (
             ("fila", "Fila", 50),
+            ("reporte", "Reporte", 200),
             ("estado", "Estado", 90),
             ("formato", "Formato", 70),
             ("duracion_seg", "Duracion(s)", 90),
-            ("archivo", "Archivo", 220),
-            ("mensaje", "Mensaje", 320),
+            ("archivo", "Archivo", 200),
+            ("mensaje", "Mensaje", 300),
         ):
             self._detail_tree.heading(col, text=text)
             self._detail_tree.column(col, width=width, anchor="w")
@@ -355,7 +357,7 @@ class CertificadosApp(tk.Tk):
             self._runs_by_iid[iid] = run
             self._runs_tree.insert(
                 "", "end", iid=iid,
-                values=(run.fecha, run.total, run.ok, run.error, run.invalido),
+                values=(run.fecha, run.reporte, run.total, run.ok, run.error, run.invalido),
             )
 
     def _on_run_selected(self, _event=None) -> None:
@@ -372,8 +374,9 @@ class CertificadosApp(tk.Tk):
             self._detail_tree.insert(
                 "", "end",
                 values=(
-                    row.get("fila", ""), row.get("estado", ""), row.get("formato", ""),
-                    row.get("duracion_seg", ""), row.get("archivo", ""), row.get("mensaje", ""),
+                    row.get("fila", ""), row.get("reporte", ""), row.get("estado", ""),
+                    row.get("formato", ""), row.get("duracion_seg", ""),
+                    row.get("archivo", ""), row.get("mensaje", ""),
                 ),
                 tags=(estado,) if estado in ("OK", "ERROR", "INVALIDO") else (),
             )

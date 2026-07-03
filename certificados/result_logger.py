@@ -22,6 +22,7 @@ from .validators import ValidationIssue
 
 _CSV_HEADER = [
     "timestamp",
+    "reporte",
     "fila",
     "estado",
     "formato",
@@ -35,9 +36,12 @@ _CSV_HEADER = [
 class ResultLogger:
     """Records the outcome of each request. One instance per batch run."""
 
-    def __init__(self, log_dir: str | Path, level: str = "INFO", extra_handlers=None):
+    def __init__(self, log_dir: str | Path, level: str = "INFO", extra_handlers=None, context=None):
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        # Contexto de la corrida (reporte, workers, timeout...). Igual para todas
+        # las filas; se registra al inicio del log y se guarda en cada resultado.
+        self._context = dict(context or {})
         # Protege la escritura del CSV cuando varios hilos registran a la vez.
         self._lock = threading.Lock()
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -66,6 +70,10 @@ class ResultLogger:
         for handler in (extra_handlers or []):
             self._logger.addHandler(handler)
 
+        if self._context:
+            detalle = " ".join(f"{k}={v}" for k, v in self._context.items())
+            self._logger.info("Inicio de ejecucion | %s", detalle)
+
     # -- events -------------------------------------------------------------
     def log_success(self, result: ReportResult, duration: float) -> None:
         req = result.request
@@ -93,6 +101,7 @@ class ResultLogger:
             self._writer.writerow(
                 [
                     datetime.now().isoformat(timespec="seconds"),
+                    self._context.get("reporte", ""),
                     request.row_number,
                     status,
                     request.output_format,
