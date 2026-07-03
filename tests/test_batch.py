@@ -147,6 +147,28 @@ def test_concurrent_invalid_skipped(tmp_path):
     assert 2 not in gateway.calls  # invalida nunca llega al gateway
 
 
+def test_progress_callback_sequential(tmp_path):
+    reqs = [make_req(2), make_req(3), make_req(4)]
+    calls = []
+    with ResultLogger(tmp_path) as logger:
+        BatchProcessor(FakeReader(reqs), build_default_validator(), FakeGateway(), logger).run(
+            on_progress=lambda done, total: calls.append((done, total))
+        )
+    assert calls == [(1, 3), (2, 3), (3, 3)]  # sube de a uno hasta el total
+
+
+def test_progress_callback_concurrent_reaches_total(tmp_path):
+    reqs = [make_req(r) for r in range(2, 7)]  # 5
+    seen = []
+    with ResultLogger(tmp_path) as logger:
+        ConcurrentBatchProcessor(
+            FakeReader(reqs), build_default_validator(), FakeGateway(), logger, max_workers=3
+        ).run(on_progress=lambda done, total: seen.append((done, total)))
+    assert len(seen) == 5
+    assert seen[-1] == (5, 5)  # termina en 100%
+    assert [d for d, _ in seen] == [1, 2, 3, 4, 5]  # monotono
+
+
 class CancelAfterGateway:
     """Marca el evento de cancelacion tras N llamadas."""
 

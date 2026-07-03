@@ -111,8 +111,10 @@ class CertificadosApp(tk.Tk):
         self._run_btn.pack(side="left")
         self._stop_btn = ttk.Button(actions, text="Detener", command=self._on_stop, state="disabled")
         self._stop_btn.pack(side="left", padx=(6, 0))
-        self._progress = ttk.Progressbar(actions, mode="indeterminate")
+        self._progress = ttk.Progressbar(actions, mode="determinate", maximum=100)
         self._progress.pack(side="left", fill="x", expand=True, padx=10)
+        self._pct = tk.StringVar(value="0%")
+        ttk.Label(actions, textvariable=self._pct, width=6).pack(side="left")
 
         log_frame = ttk.LabelFrame(parent, text="Registro en vivo")
         log_frame.pack(fill="both", expand=True, padx=8, pady=8)
@@ -615,6 +617,12 @@ class CertificadosApp(tk.Tk):
                 kind = message[0]
                 if kind == "log":
                     self._append_log(message[1])
+                elif kind == "progress":
+                    _, done, total = message
+                    pct = int(done * 100 / total) if total else 0
+                    self._progress["value"] = pct
+                    self._pct.set(f"{pct}%")
+                    self._status.set(f"Procesando... {done}/{total} ({pct}%)")
                 elif kind == "item":
                     _, item_id, estado, detalle = message
                     if self._single_tree.exists(item_id):
@@ -624,6 +632,8 @@ class CertificadosApp(tk.Tk):
                 elif kind == "done":
                     summary = message[1]
                     self._set_running(False)
+                    self._progress["value"] = 100
+                    self._pct.set("100%")
                     self._status.set(f"Terminado. {summary}")
                     self._append_log(f"== {summary} ==")
                     self._load_runs()  # la nueva ejecucion aparece en la pestana Logs
@@ -646,11 +656,11 @@ class CertificadosApp(tk.Tk):
         self._stop_btn.configure(state=stop_state)
         self._single_stop_btn.configure(state=stop_state)
         if running:
-            self._progress.start(12)
+            self._progress["value"] = 0
+            self._pct.set("0%")
             self._status.set("Procesando...")
         else:
             self._active = None
-            self._progress.stop()
 
     def _append_log(self, text: str) -> None:
         self._log.configure(state="normal")

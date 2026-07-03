@@ -177,7 +177,8 @@ class BatchController:
                         )
                     else:
                         processor = BatchProcessor(reader, validator, gateway, logger)
-                    summary = processor.run(cancel_event=cancel_event)
+                    on_progress = lambda done, total: out_queue.put(("progress", done, total))
+                    summary = processor.run(cancel_event=cancel_event, on_progress=on_progress)
                 out_queue.put(("done", summary))
             except Exception as exc:  # todo error va a la GUI, no revienta el hilo
                 out_queue.put(("error", exc))
@@ -212,6 +213,13 @@ class BatchController:
                 context = _run_context(settings, origen="Formulario individual")
                 with ResultLogger(settings.log_dir, settings.log_level,
                                   extra_handlers=[handler], context=context) as logger:
+                    total = len(items)
+                    progress = {"done": 0}
+
+                    def bump():
+                        progress["done"] += 1
+                        out_queue.put(("progress", progress["done"], total))
+
                     # Validacion secuencial (barata); las validas van al ejecutor.
                     valid = []
                     for item_id, request in items:
@@ -223,6 +231,7 @@ class BatchController:
                             logger.log_invalid(request, result.issues, 0.0)
                             out_queue.put(("item", item_id, "INVALIDO", detail))
                             summary.invalid += 1
+                            bump()
 
                     def work(pair):
                         item_id, request = pair
@@ -240,6 +249,7 @@ class BatchController:
                         else:
                             out_queue.put(("item", item_id, "ERROR", ""))
                             summary.failed += 1
+                        bump()
 
                     if settings.max_workers > 1:
                         with ThreadPoolExecutor(max_workers=settings.max_workers) as pool:

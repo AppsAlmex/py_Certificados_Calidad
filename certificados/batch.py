@@ -50,10 +50,12 @@ class BatchProcessor:
         self._gateway = gateway
         self._logger = logger
 
-    def run(self, cancel_event=None) -> BatchSummary:
+    def run(self, cancel_event=None, on_progress=None) -> BatchSummary:
         # A read error is fatal (no rows to process) and propagates to caller.
         requests = self._reader.read()
-        summary = BatchSummary(total=len(requests))
+        total = len(requests)
+        summary = BatchSummary(total=total)
+        done = 0
 
         for request in requests:
             # Cancelacion cooperativa: se detiene antes de lanzar la siguiente fila.
@@ -66,12 +68,14 @@ class BatchProcessor:
             if not result.valid:
                 self._logger.log_invalid(request, result.issues, time.perf_counter() - start)
                 summary.invalid += 1
-                continue
-
-            if execute_and_log(self._gateway, self._logger, request):
+            elif execute_and_log(self._gateway, self._logger, request):
                 summary.success += 1
             else:
                 summary.failed += 1
+
+            done += 1
+            if on_progress:
+                on_progress(done, total)
 
         self._logger.summary(summary)
         return summary
@@ -94,9 +98,11 @@ class ConcurrentBatchProcessor:
         self._logger = logger
         self._max_workers = max(1, max_workers)
 
-    def run(self, cancel_event=None) -> BatchSummary:
+    def run(self, cancel_event=None, on_progress=None) -> BatchSummary:
         requests = self._reader.read()
-        summary = BatchSummary(total=len(requests))
+        total = len(requests)
+        summary = BatchSummary(total=total)
+        done = 0
 
         valid = []
         for request in requests:
@@ -106,6 +112,9 @@ class ConcurrentBatchProcessor:
             else:
                 self._logger.log_invalid(request, result.issues, 0.0)
                 summary.invalid += 1
+                done += 1
+                if on_progress:
+                    on_progress(done, total)
 
         def guarded(req):
             # Tareas aun no iniciadas se saltan si ya se cancelo; las en vuelo terminan.
@@ -123,6 +132,9 @@ class ConcurrentBatchProcessor:
                     summary.success += 1
                 else:
                     summary.failed += 1
+                done += 1
+                if on_progress:
+                    on_progress(done, total)
 
         self._logger.summary(summary)
         return summary
