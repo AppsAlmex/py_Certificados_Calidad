@@ -52,10 +52,17 @@ class OracleReportClient(ReportGateway):
 
     # -- public API ---------------------------------------------------------
     def run_report(self, request: ReportRequest) -> ReportResult:
+        content = self.fetch_bytes(request)
+        return self._save(request, content)
+
+    def fetch_bytes(self, request: ReportRequest) -> bytes:
+        """Descarga y decodifica el reporte de Oracle SIN guardarlo.
+
+        Util para reusar la data (p.ej. pedir XML y renderizar el PDF localmente).
+        """
         soap = self._build_soap(request)
         response = self._send(soap)
-        content = self._extract_report(response)
-        return self._save(request, content)
+        return self._extract_report(response)
 
     # -- steps --------------------------------------------------------------
     def _build_soap(self, request: ReportRequest) -> str:
@@ -147,11 +154,59 @@ class OracleReportClient(ReportGateway):
             raise ReportGenerationError(f"reportBytes no es base64 valido: {exc}") from exc
 
     def _save(self, request: ReportRequest, content: bytes) -> ReportResult:
-        out_dir = self._settings.output_dir
+        return save_report(self._settings.output_dir, request, content)
+
+
+def save_report(output_dir, request: ReportRequest, content: bytes) -> ReportResult:
+    """Guarda ``content`` como el archivo del reporte y devuelve el resultado."""
+    out_dir = Path(output_dir)
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / request.resolved_name()
+        path.write_bytes(content)
+    except OSError as exc:
+        raise FileSaveError(f"No se pudo guardar el reporte: {exc}") from exc
+    return ReportResult(request=request, file_path=path, size_bytes=len(content))
+
+
+class LocalPdfReportGateway(ReportGateway):
+    """Envuelve a Oracle para generar el PDF con nuestra plantilla local.
+
+    Para formato de salida ``pdf``: pide el XML (data) a Oracle y lo renderiza con
+    ``HtmlLayoutRenderer`` (plantilla editable). Para xml/xlsx delega en Oracle tal
+    cual, porque ahi no hay layout local que aplicar. No modifica a
+    ``OracleReportClient`` (Open/Closed): lo compone.
+    """
+
+    def __init__(self, settings: Settings, oracle_client: "OracleReportClient | None" = None, renderer=None):
+        self._settings = settings
+        self._oracle = oracle_client or OracleReportClient(settings)
+        self._renderer = renderer  # se crea perezosamente (evita importar playwright si no se usa)
+
+    def _get_renderer(self):
+        if self._renderer is None:
+            from .pdf_renderer import HtmlLayoutRenderer
+            self._renderer = HtmlLayoutRenderer(page_format=self._settings.pdf_page_format)
+        return self._renderer
+
+    def run_report(self, request: ReportRequest) -> ReportResult:
+        if request.output_format.lower() != "pdf":
+            return self._oracle.run_report(request)  # sin layout local para xml/xlsx
+
+        from dataclasses import replace
+        from .certificate_data import parse_certificate
+
+        xml_request = replace(request, output_format="xml")
+        xml_bytes = self._oracle.fetch_bytes(xml_request)
         try:
-            out_dir.mkdir(parents=True, exist_ok=True)
-            path = out_dir / request.resolved_name()
-            path.write_bytes(content)
-        except OSError as exc:
-            raise FileSaveError(f"No se pudo guardar el reporte: {exc}") from exc
-        return ReportResult(request=request, file_path=path, size_bytes=len(content))
+            pdf_bytes = self._get_renderer().render(parse_certificate(xml_bytes))
+        except Exception as exc:
+            raise ReportGenerationError(f"Error al renderizar el PDF local: {exc}") from exc
+        return save_report(self._settings.output_dir, request, pdf_bytes)
+
+
+def build_gateway(settings: Settings) -> ReportGateway:
+    """Elige el gateway segun el motor de PDF configurado (oracle | local)."""
+    if getattr(settings, "pdf_engine", "oracle").lower() == "local":
+        return LocalPdfReportGateway(settings)
+    return OracleReportClient(settings)

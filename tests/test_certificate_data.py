@@ -1,5 +1,8 @@
+import pytest
+
 from certificados.certificate_data import parse_certificate
-from certificados.pdf_renderer import HtmlLayoutRenderer
+from certificados.exceptions import LayoutError
+from certificados.pdf_renderer import HtmlLayoutRenderer, available_local_formats
 
 SAMPLE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <DATA_DS><P_FORMATO>1</P_FORMATO>
@@ -58,7 +61,12 @@ def test_render_html_contains_data():
     assert "111,222" in html
 
 
-def test_template_fallback_for_unknown_formato():
-    d = parse_certificate(SAMPLE_XML)
-    d.formato = "99"  # no existe formato99.html
-    assert HtmlLayoutRenderer().template_name(d.formato) == "formato1.html"
+def test_unknown_formato_raises_layout_error():
+    # Sin fallback: si no hay plantilla local para ese formato -> error controlado.
+    with pytest.raises(LayoutError, match="formato '99'"):
+        HtmlLayoutRenderer().template_name("99")
+
+
+def test_available_local_formats_lists_existing():
+    formatos = available_local_formats()
+    assert "1" in formatos  # existe formato1.html

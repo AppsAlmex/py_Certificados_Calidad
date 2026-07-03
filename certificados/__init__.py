@@ -15,7 +15,9 @@ from .exceptions import (
     ReportConnectionError,
     ReportGenerationError,
     FileSaveError,
+    LayoutError,
 )
+from .pdf_renderer import available_local_formats
 from .csv_reader import CSVReader
 from .validators import (
     RequestValidator,
@@ -28,7 +30,7 @@ from .validators import (
     DateRule,
     build_default_validator,
 )
-from .executor import ReportGateway, OracleReportClient
+from .executor import ReportGateway, OracleReportClient, LocalPdfReportGateway, build_gateway
 from .result_logger import ResultLogger
 from .batch import BatchProcessor, ConcurrentBatchProcessor, execute_and_log
 
@@ -68,6 +70,10 @@ __all__ = [
     "build_default_validator",
     "ReportGateway",
     "OracleReportClient",
+    "LocalPdfReportGateway",
+    "build_gateway",
+    "available_local_formats",
+    "LayoutError",
     "ResultLogger",
     "BatchProcessor",
     "ConcurrentBatchProcessor",

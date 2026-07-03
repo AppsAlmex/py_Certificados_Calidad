@@ -103,7 +103,7 @@ def test_process_requests_async(tmp_path, monkeypatch, settings):
         def run_report(self, request):
             return ReportResult(request, Path("x.pdf"), 5)
 
-    monkeypatch.setattr(ctrl_mod, "OracleReportClient", FakeClient)
+    monkeypatch.setattr(ctrl_mod, "build_gateway", lambda settings: FakeClient(settings))
 
     valid = ReportRequest(
         1,
@@ -151,7 +151,7 @@ def test_process_requests_concurrent(tmp_path, monkeypatch, settings):
                 state["active"] -= 1
             return ReportResult(request, Path("x.pdf"), 5)
 
-    monkeypatch.setattr(ctrl_mod, "OracleReportClient", FakeClient)
+    monkeypatch.setattr(ctrl_mod, "build_gateway", lambda settings: FakeClient(settings))
 
     def make(n):
         return ReportRequest(

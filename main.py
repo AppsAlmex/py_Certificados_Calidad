@@ -13,9 +13,9 @@ from certificados import (
     BatchProcessor,
     ConcurrentBatchProcessor,
     CSVReader,
-    OracleReportClient,
     ResultLogger,
     build_default_validator,
+    build_gateway,
     load_settings,
 )
 from certificados.exceptions import CertificadoError
@@ -30,6 +30,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--report", default=None, help="Clave del reporte a consumir (override de CERT_REPORT)")
     parser.add_argument("--timeout", type=int, default=None, help="Read timeout en segundos (override de CERT_TIMEOUT)")
     parser.add_argument("--workers", type=int, default=None, help="Hilos concurrentes (override de CERT_WORKERS; 1 = secuencial)")
+    parser.add_argument("--engine", choices=["oracle", "local"], default=None,
+                        help="Motor de PDF (override de config): oracle = BI Publisher, local = plantilla HTML")
     return parser.parse_args(argv)
 
 
@@ -37,7 +39,8 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     try:
         settings = load_settings(
-            args.config, args.env, report=args.report, timeout=args.timeout, workers=args.workers
+            args.config, args.env, report=args.report, timeout=args.timeout,
+            workers=args.workers, pdf_engine=args.engine,
         )
     except CertificadoError as exc:
         print(f"[CONFIG] {exc}", file=sys.stderr)
@@ -45,11 +48,11 @@ def main(argv=None) -> int:
 
     print(f"Reporte: {settings.report_key} -> {settings.report_path}")
     print(f"Timeout: connect={settings.connect_timeout}s read={settings.timeout}s")
-    print(f"Workers: {settings.max_workers}")
+    print(f"Workers: {settings.max_workers} | Motor PDF: {settings.pdf_engine}")
 
     reader = CSVReader(args.csv, delimiter=args.delimiter)
     validator = build_default_validator()
-    gateway = OracleReportClient(settings)
+    gateway = build_gateway(settings)
 
     context = {
         "reporte": settings.report_key,

@@ -9,15 +9,31 @@ y el CSS; no se toca este codigo (Open/Closed).
 """
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from base64 import b64encode
 from pathlib import Path
+from typing import List
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .certificate_data import CertificateData, parse_certificate
+from .exceptions import LayoutError
 
 LAYOUTS_DIR = Path(__file__).parent / "layouts"
+
+
+def available_local_formats(templates_dir=LAYOUTS_DIR) -> List[str]:
+    """Formatos con plantilla local (archivos formato<X>.html). Ej: ['1']."""
+    directory = Path(templates_dir)
+    if not directory.exists():
+        return []
+    formatos = []
+    for file in sorted(directory.glob("formato*.html")):
+        match = re.fullmatch(r"formato(.+)\.html", file.name)
+        if match:
+            formatos.append(match.group(1))
+    return formatos
 
 
 class LayoutRenderer(ABC):
@@ -53,9 +69,13 @@ class HtmlLayoutRenderer(LayoutRenderer):
 
     def template_name(self, formato: str) -> str:
         name = f"formato{formato}.html"
-        if (self.templates_dir / name).exists():
-            return name
-        return "formato1.html"  # fallback
+        if not (self.templates_dir / name).exists():
+            disponibles = ", ".join(available_local_formats(self.templates_dir)) or "ninguno"
+            raise LayoutError(
+                f"No existe plantilla local para el formato '{formato}'. "
+                f"Formatos con plantilla: {disponibles}"
+            )
+        return name
 
     def render_html(self, data: CertificateData) -> str:
         template = self._env.get_template(self.template_name(data.formato))

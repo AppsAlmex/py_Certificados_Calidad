@@ -139,8 +139,33 @@ python gui_app.py
   Botón "Refrescar"; se actualiza sola al terminar una ejecución.
 - **Settings** (configuración *interna*, persistente): host, service path,
   timeouts, verify_ssl, carpetas, nivel de log, credenciales, catálogo de
-  reportes y workers por defecto. "Guardar configuración" escribe `config.ini`
-  y `.env` (vía el núcleo, no la GUI).
+  reportes, workers por defecto y **Motor de PDF**. "Guardar configuración"
+  escribe `config.ini` y `.env` (vía el núcleo, no la GUI).
+
+### Motor de PDF (opt-in, elegido por el usuario en cada corrida)
+
+- **`oracle`** (default) — PDF original del RTF de BI Publisher. La app igual que siempre.
+- **`local`** — pide a Oracle solo el **XML (data)** y genera el PDF con una
+  **plantilla HTML editable** (`certificados/layouts/formatoN.html`) vía Chromium
+  headless (Playwright). Logo/firma en `certificados/layouts/assets/`.
+
+**Cómo se elige (precedencia):** combo "Motor" en la GUI (pestaña CSV e individual)
+o `--engine` en `main.py` > `CERT_PDF_ENGINE` (env) > `[pdf] engine` en config.ini
+(default `oracle`). El config solo da el default; el usuario decide por corrida.
+
+**Reglas de la lógica:**
+
+- El motor **local solo aplica al PDF**. Si el formato de salida es `xml`/`xlsx`,
+  `LocalPdfReportGateway` delega en Oracle tal cual (no hay layout local).
+- Con `local`, el combo de **formato** (P_FORMATO) muestra solo los formatos con
+  **plantilla local** (`formatoN.html` existentes; hoy solo `1`), ignorando el
+  catálogo de Oracle. Con `oracle`, muestra el catálogo configurado.
+- Si se pide `local` para un formato **sin plantilla** (o el render falla) →
+  **error controlado** (`LayoutError`), se registra en el log, esa fila queda en
+  ERROR y el batch continúa. Sin fallback a BI.
+
+Diseño no invasivo: `LocalPdfReportGateway` **envuelve** al cliente Oracle (OCP).
+Requiere `playwright` + `python -m playwright install chromium`.
 
 **Detener (cancelación cooperativa):** para nuevas peticiones y no lanza más; la
 petición **en curso termina** (un único reporte de 70 min no se aborta a la

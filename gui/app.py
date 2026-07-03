@@ -100,6 +100,11 @@ class CertificadosApp(tk.Tk):
         ttk.Spinbox(top, from_=MIN_WORKERS, to=MAX_WORKERS, textvariable=self._vars["workers"],
                     width=6).grid(row=2, column=1, sticky="w", padx=6)
 
+        ttk.Label(top, text="Motor de PDF:").grid(row=3, column=0, sticky="w", padx=6, pady=6)
+        self._exec_engine_var = tk.StringVar(value="oracle")
+        ttk.Combobox(top, textvariable=self._exec_engine_var, values=["oracle", "local"],
+                     state="readonly", width=10).grid(row=3, column=1, sticky="w", padx=6)
+
         actions = ttk.Frame(parent)
         actions.pack(fill="x", padx=8)
         self._run_btn = ttk.Button(actions, text="Ejecutar", command=self._on_run)
@@ -188,6 +193,13 @@ class CertificadosApp(tk.Tk):
         self._single_workers_var = tk.IntVar(value=1)
         ttk.Spinbox(options, from_=MIN_WORKERS, to=MAX_WORKERS,
                     textvariable=self._single_workers_var, width=6).grid(row=0, column=3, sticky="w", padx=6)
+        ttk.Label(options, text="Motor:").grid(row=0, column=4, sticky="w", padx=(18, 6))
+        self._single_engine_var = tk.StringVar(value="oracle")
+        engine_combo = ttk.Combobox(options, textvariable=self._single_engine_var,
+                                    values=["oracle", "local"], state="readonly", width=8)
+        engine_combo.grid(row=0, column=5, sticky="w", padx=6)
+        # Al cambiar el motor, el combo de formato carga plantillas locales o el catalogo.
+        engine_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_formato_options())
 
         list_btns = ttk.Frame(parent)
         list_btns.pack(fill="x", padx=8, pady=(0, 8))
@@ -208,8 +220,27 @@ class CertificadosApp(tk.Tk):
         if col in CATALOG_FIELDS:
             entries = self._catalogs.get(col, [])
             # editable: si el catalogo no cubre un valor, el usuario puede escribirlo.
-            return ttk.Combobox(parent, textvariable=var, values=[e.display for e in entries])
+            combo = ttk.Combobox(parent, textvariable=var, values=[e.display for e in entries])
+            if col == "formato":
+                self._formato_combo = combo  # se repuebla segun el motor elegido
+            return combo
         return ttk.Entry(parent, textvariable=var)
+
+    def _update_formato_options(self) -> None:
+        """Con motor local, el combo de formato muestra solo plantillas locales;
+        con oracle, el catalogo de formatos configurado."""
+        if not hasattr(self, "_formato_combo"):
+            return
+        if self._single_engine_var.get() == "local":
+            valores = self.controller.local_formats()  # ej. ['1']
+        else:
+            valores = [e.display for e in self._catalogs.get("formato", [])]
+        self._formato_combo["values"] = valores
+        actual = self._single_vars["formato"].get()
+        # Si el valor actual no aplica al nuevo motor, toma el primero disponible.
+        actuales_val = [v.split(" - ")[0] for v in valores]
+        if valores and actual.split(" - ")[0] not in actuales_val:
+            self._single_vars["formato"].set(valores[0])
 
     def _clear_single_form(self) -> None:
         for col in PARAM_COLUMNS:
@@ -267,12 +298,16 @@ class CertificadosApp(tk.Tk):
             return
         report = self._single_report_var.get()
         workers = int(self._single_workers_var.get())
+        engine = self._single_engine_var.get()
         self._active = "single"
         self._set_running(True)
         self._append_log(
-            f"Procesando {len(pending)} certificado(s) | reporte={report} | workers={workers}"
+            f"Procesando {len(pending)} certificado(s) | reporte={report} "
+            f"| workers={workers} | motor={engine}"
         )
-        self.controller.process_requests_async(pending, self._queue, report=report, workers=workers)
+        self.controller.process_requests_async(
+            pending, self._queue, report=report, workers=workers, engine=engine
+        )
 
     # ------------------------------------------------------------------ LOGS
     def _build_logs_tab(self, parent: ttk.Frame) -> None:
@@ -433,6 +468,13 @@ class CertificadosApp(tk.Tk):
         ttk.Spinbox(form, from_=MIN_WORKERS, to=MAX_WORKERS, textvariable=self._vars["max_workers"],
                     width=6).grid(row=n + 3, column=1, sticky="w", padx=6)
 
+        ttk.Label(form, text="Motor de PDF:").grid(row=n + 4, column=0, sticky="w", padx=6, pady=4)
+        self._vars["pdf_engine"] = tk.StringVar(value="oracle")
+        ttk.Combobox(form, textvariable=self._vars["pdf_engine"], values=["oracle", "local"],
+                     state="readonly", width=12).grid(row=n + 4, column=1, sticky="w", padx=6)
+        ttk.Label(form, text="oracle = PDF original de BI Publisher  |  local = plantilla HTML nuestra",
+                  foreground="#666").grid(row=n + 5, column=1, sticky="w", padx=6)
+
         cat = ttk.LabelFrame(parent, text="Catalogo de reportes (una linea:  clave = /ruta/reporte.xdo)")
         cat.pack(fill="both", expand=True, padx=8, pady=8)
         self._reports_text = tk.Text(cat, height=8, wrap="none")
@@ -451,7 +493,8 @@ class CertificadosApp(tk.Tk):
             return
 
         for key in ("host", "service_path", "timeout", "connect_timeout", "output_dir",
-                    "log_dir", "user", "password", "log_level", "default_report", "max_workers"):
+                    "log_dir", "user", "password", "log_level", "default_report",
+                    "max_workers", "pdf_engine"):
             if key in self._vars:
                 self._vars[key].set(raw[key])
         self._vars["verify_ssl"].set(raw["verify_ssl"])
@@ -464,6 +507,12 @@ class CertificadosApp(tk.Tk):
         default_workers = int(raw["max_workers"] or 1)
         self._vars["workers"].set(default_workers)
         self._single_workers_var.set(default_workers)
+
+        # Motor de PDF: el config da el default; el usuario lo cambia por corrida.
+        engine = raw.get("pdf_engine", "oracle")
+        self._exec_engine_var.set(engine)
+        self._single_engine_var.set(engine)
+        self._update_formato_options()
 
     def _refresh_report_combos(self, keys: list[str], default: str) -> None:
         self._report_combo["values"] = keys
@@ -514,6 +563,7 @@ class CertificadosApp(tk.Tk):
                 output_dir=self._vars["output_dir"].get().strip() or "output",
                 log_dir=self._vars["log_dir"].get().strip() or "logs",
                 log_level=self._vars["log_level"].get(),
+                pdf_engine=self._vars["pdf_engine"].get(),
                 user=self._vars["user"].get().strip(),
                 password=self._vars["password"].get(),
             )
@@ -537,13 +587,15 @@ class CertificadosApp(tk.Tk):
 
         self._active = "batch"
         self._set_running(True)
+        engine = self._exec_engine_var.get()
         self._append_log(f"Iniciando: {csv_path} | reporte={self._vars['report'].get()} "
-                         f"| workers={self._vars['workers'].get()}")
+                         f"| workers={self._vars['workers'].get()} | motor={engine}")
         self.controller.run_async(
             csv_path,
             self._vars["report"].get(),
             int(self._vars["workers"].get()),
             self._queue,
+            engine=engine,
         )
 
     def _on_stop(self) -> None:

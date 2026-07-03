@@ -21,6 +21,10 @@ class CatalogError(CertificadoError):
     """A value/description catalog CSV is malformed."""
 
 
+class LayoutError(CertificadoError):
+    """No local HTML template exists for the requested format, or it failed."""
+
+
 class ValidationFailedError(CertificadoError):
     """A request failed validation. Carries the list of issues."""
 

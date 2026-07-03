@@ -37,6 +37,8 @@ class Settings:
     output_dir: Path
     log_dir: Path
     log_level: str
+    pdf_engine: str = "oracle"        # oracle (RTF de BI Publisher) | local (plantilla HTML)
+    pdf_page_format: str = "Letter"
 
     @property
     def service_url(self) -> str:
@@ -79,6 +81,7 @@ def load_settings(
     report: str | None = None,
     timeout: int | None = None,
     workers: int | None = None,
+    pdf_engine: str | None = None,
 ) -> Settings:
     """Build ``Settings`` from ``config.ini`` + ``.env``.
 
@@ -169,6 +172,16 @@ def load_settings(
         "on",
     )
 
+    # -- motor de PDF: arg > CERT_PDF_ENGINE > config.ini (default oracle) -----
+    pdf_engine = (
+        pdf_engine
+        or os.getenv("CERT_PDF_ENGINE")
+        or _get(parser, "pdf", "engine", fallback="oracle")
+    ).strip().lower()
+    if pdf_engine not in ("oracle", "local"):
+        raise ConfigError(f"pdf engine invalido: '{pdf_engine}' (usa oracle | local)")
+    pdf_page_format = _get(parser, "pdf", "page_format", fallback="Letter")
+
     return Settings(
         host=_get(parser, "service", "host"),
         service_path=_get(parser, "service", "service_path"),
@@ -184,6 +197,8 @@ def load_settings(
         output_dir=Path(_get(parser, "output", "output_dir", fallback="output")),
         log_dir=Path(_get(parser, "logging", "log_dir", fallback="logs")),
         log_level=_get(parser, "logging", "log_level", fallback="INFO"),
+        pdf_engine=pdf_engine,
+        pdf_page_format=pdf_page_format,
     )
 
 
@@ -202,6 +217,8 @@ def save_config(
     output_dir: str,
     log_dir: str,
     log_level: str,
+    pdf_engine: str = "oracle",
+    pdf_page_format: str = "Letter",
     user: str | None = None,
     password: str | None = None,
 ) -> None:
@@ -221,6 +238,8 @@ def save_config(
         raise ConfigError(
             f"max_workers debe estar entre {MIN_WORKERS} y {MAX_WORKERS}, recibido: {max_workers}"
         )
+    if pdf_engine.lower() not in ("oracle", "local"):
+        raise ConfigError(f"pdf engine invalido: '{pdf_engine}' (usa oracle | local)")
 
     parser = configparser.ConfigParser()
     parser.optionxform = str
@@ -238,6 +257,7 @@ def save_config(
     parser["batch"] = {"max_workers": str(max_workers)}
     parser["output"] = {"output_dir": str(output_dir)}
     parser["logging"] = {"log_dir": str(log_dir), "log_level": log_level}
+    parser["pdf"] = {"engine": pdf_engine.lower(), "page_format": pdf_page_format}
 
     with open(config_path, "w", encoding="utf-8") as fh:
         parser.write(fh)

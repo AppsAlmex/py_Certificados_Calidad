@@ -20,9 +20,10 @@ from certificados import (
     BatchProcessor,
     ConcurrentBatchProcessor,
     CSVReader,
-    OracleReportClient,
     ResultLogger,
+    available_local_formats,
     build_default_validator,
+    build_gateway,
     execute_and_log,
     load_catalog,
     load_settings,
@@ -98,12 +99,18 @@ class BatchController:
             "default_report": get("service", "default_report", next(iter(reports), "")),
             "reports": reports,
             "max_workers": get("batch", "max_workers", "1"),
+            "pdf_engine": get("pdf", "engine", "oracle"),
+            "pdf_page_format": get("pdf", "page_format", "Letter"),
             "output_dir": get("output", "output_dir", "output"),
             "log_dir": get("logging", "log_dir", "logs"),
             "log_level": get("logging", "log_level", "INFO"),
             "user": env.get("CERT_USER", "") or "",
             "password": env.get("CERT_PASSWORD", "") or "",
         }
+
+    def local_formats(self) -> list:
+        """Formatos con plantilla local (para poblar el combo cuando engine=local)."""
+        return available_local_formats()
 
     def read_catalogs(self) -> dict:
         """Carga los catalogos valor/descripcion definidos en [catalogs].
@@ -146,7 +153,8 @@ class BatchController:
         return handler
 
     # -- ejecucion masiva desde CSV, en hilo ----------------------------------
-    def run_async(self, csv_path: str, report: str, workers: int, out_queue: "queue.Queue") -> None:
+    def run_async(self, csv_path: str, report: str, workers: int, out_queue: "queue.Queue",
+                  engine: str | None = None) -> None:
         handler = self._make_handler(out_queue)
         self._cancel_event = threading.Event()
         cancel_event = self._cancel_event
@@ -154,11 +162,12 @@ class BatchController:
         def task():
             try:
                 settings = load_settings(
-                    self.config_path, self.env_path, report=report or None, workers=workers
+                    self.config_path, self.env_path, report=report or None,
+                    workers=workers, pdf_engine=engine,
                 )
                 reader = CSVReader(csv_path)
                 validator = build_default_validator()
-                gateway = OracleReportClient(settings)
+                gateway = build_gateway(settings)
                 context = _run_context(settings, origen=f"CSV:{csv_path}")
                 with ResultLogger(settings.log_dir, settings.log_level,
                                   extra_handlers=[handler], context=context) as logger:
@@ -177,7 +186,8 @@ class BatchController:
 
     # -- procesamiento de solicitudes individuales (pestana de 1 en 1) --------
     def process_requests_async(self, items, out_queue: "queue.Queue",
-                               report: str | None = None, workers: int = 1) -> None:
+                               report: str | None = None, workers: int = 1,
+                               engine: str | None = None) -> None:
         """Procesa una lista de (item_id, ReportRequest) reportando estado por item.
 
         Tiene paridad con el batch: elige ``report`` y ``workers``. Emite
@@ -193,10 +203,11 @@ class BatchController:
         def task():
             try:
                 settings = load_settings(
-                    self.config_path, self.env_path, report=report or None, workers=workers
+                    self.config_path, self.env_path, report=report or None,
+                    workers=workers, pdf_engine=engine,
                 )
                 validator = build_default_validator()
-                gateway = OracleReportClient(settings)
+                gateway = build_gateway(settings)
                 summary = BatchSummary(total=len(items))
                 context = _run_context(settings, origen="Formulario individual")
                 with ResultLogger(settings.log_dir, settings.log_level,
