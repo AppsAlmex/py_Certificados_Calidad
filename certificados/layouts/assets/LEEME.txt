@@ -1,0 +1,9 @@
+Coloca aqui las imagenes que usan las plantillas:
+
+  logo.png   -> logo ALMEX del encabezado (si falta, se muestra un recuadro "ALMEX")
+  firma.png  -> firma del inspector (opcional)
+
+Las plantillas las incrustan con {{ asset('logo.png') }} (se leen desde esta
+carpeta y se embeben en el PDF como data URI, sin rutas absolutas).
+
+Formatos soportados: .png .jpg .jpeg .gif .svg
