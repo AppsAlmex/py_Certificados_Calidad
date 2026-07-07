@@ -46,8 +46,32 @@ def _selftest() -> int:
     return code
 
 
+def _run_gui() -> None:
+    """Lanza la GUI y, ante CUALQUIER error de arranque, lo deja en error.log y
+    lo muestra en un cuadro (para que nunca sea un crash silencioso/parpadeo)."""
+    try:
+        from gui.app import launch
+        launch()
+    except Exception:
+        import traceback
+        detalle = traceback.format_exc()
+        try:
+            from pathlib import Path
+            Path("error.log").write_text(detalle, encoding="utf-8")
+        except Exception:
+            pass
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Error al iniciar Certificados de Calidad", detalle)
+        except Exception:
+            pass
+        raise
+
+
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         sys.exit(_selftest())
-    from gui.app import launch
-    launch()
+    _run_gui()

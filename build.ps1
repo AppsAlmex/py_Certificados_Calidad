@@ -11,6 +11,11 @@ param([switch]$Chromium, [switch]$OneFile, [switch]$Debug)
 $ErrorActionPreference = "Stop"
 $py = ".\.venv\Scripts\python.exe"
 
+# Cerrar cualquier instancia abierta que bloquee dist\, y limpiar salidas previas.
+Get-Process CertificadosCalidad -ErrorAction SilentlyContinue | Stop-Process -Force
+if (Test-Path ".\dist")  { Remove-Item ".\dist"  -Recurse -Force -ErrorAction SilentlyContinue }
+if (Test-Path ".\build") { Remove-Item ".\build" -Recurse -Force -ErrorAction SilentlyContinue }
+
 Write-Host "== Instalando PyInstaller ==" -ForegroundColor Cyan
 & $py -m pip install pyinstaller -q
 
@@ -42,7 +47,29 @@ if ($Chromium) {
   }
 }
 
+Write-Host "== Verificando salida completa ==" -ForegroundColor Cyan
+$checks = @{
+  "exe"        = "$dist\CertificadosCalidad.exe"
+  "config.ini" = "$dist\config.ini"
+  ".env"       = "$dist\.env"
+  "catalogos"  = "$dist\catalogos"
+  "layouts"    = "$dist\layouts\formato1.html"
+}
+if (-not $OneFile) { $checks["_internal"] = "$dist\_internal\python313.dll" }
+if ($Chromium)     { $checks["chromium"]  = "$dist\ms-playwright" }
+$ok = $true
+foreach ($k in $checks.Keys) {
+  $exists = Test-Path $checks[$k]
+  if (-not $exists) { $ok = $false }
+  Write-Host ("  {0,-12} {1}" -f $k, $(if($exists){"OK"}else{"FALTA"}))
+}
+
 Write-Host "== Listo -> $dist\CertificadosCalidad.exe ==" -ForegroundColor Green
+if ($ok) {
+  Write-Host "Salida completa. Zipea la carpeta: $dist" -ForegroundColor Green
+} else {
+  Write-Warning "Faltan archivos en la salida (ver arriba)."
+}
 if (-not $OneFile) {
   Write-Host "IMPORTANTE: distribuye la CARPETA completa (exe + _internal\)." -ForegroundColor Yellow
 }
