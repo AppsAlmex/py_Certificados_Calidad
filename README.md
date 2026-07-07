@@ -137,10 +137,24 @@ python gui_app.py
   **detalle por fila** (estado con color, formato, duración, archivo, mensaje) en
   la sub‑pestaña "Resultados" y el **log de texto completo** en "Log completo".
   Botón "Refrescar"; se actualiza sola al terminar una ejecución.
-- **Settings** (configuración *interna*, persistente): host, service path,
-  timeouts, verify_ssl, carpetas, nivel de log, credenciales, catálogo de
-  reportes, workers por defecto y **Motor de PDF**. "Guardar configuración"
-  escribe `config.ini` y `.env` (vía el núcleo, no la GUI).
+Barra superior con tres botones:
+
+- **Configuración (Settings)**: abre una **ventana modal** (bloquea la principal)
+  con la config interna (host, timeouts, verify_ssl, carpetas, credenciales,
+  catálogo de reportes, workers y motor de PDF). "Guardar y aplicar" valida y
+  escribe `config.ini`/`.env`; al cerrarse, la principal **recarga y revalida** y
+  avisa si algo quedó mal.
+- **Health check**: corre un **test entero** de la app y muestra el resultado en
+  tabla (config, catálogo de reportes, validación de cada catálogo valor/desc,
+  carpetas escribibles, plantillas locales + Chromium si motor local, y
+  conectividad al servicio).
+La ventana Settings tiene pestañas internas: **Configuración**, **Catálogos**
+(recargar + validar en caliente), **Health check** e **Info / Ayuda** (lee los
+manuales de `docs/` en modo solo lectura).
+
+El icono de la app y del `.exe` es `certificados/layouts/assets/LogoAlmex32.ico`.
+Los manuales de usuario viven en `docs/` (`Manual de Usuario.md`,
+`Solucion de Problemas.md`) y se empaquetan dentro del `.exe` (no editables).
 
 ### Motor de PDF (opt-in, elegido por el usuario en cada corrida)
 

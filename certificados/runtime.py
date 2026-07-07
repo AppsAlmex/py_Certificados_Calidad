@@ -28,3 +28,19 @@ def resource_dir() -> Path:
     if is_frozen():
         return Path(getattr(sys, "_MEIPASS", app_dir()))
     return Path(__file__).resolve().parent.parent
+
+
+def docs_dir() -> Path:
+    """Carpeta de documentacion (manuales de usuario). Empaquetada = solo lectura."""
+    if is_frozen():
+        bundled = resource_dir() / "docs"
+        if bundled.exists():
+            return bundled
+        return app_dir() / "docs"
+    return Path(__file__).resolve().parent.parent / "docs"
+
+
+def icon_path() -> Path:
+    """Ruta al icono .ico de la app (viaja con las plantillas/assets)."""
+    from .pdf_renderer import LAYOUTS_DIR
+    return Path(LAYOUTS_DIR) / "assets" / "LogoAlmex32.ico"

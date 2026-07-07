@@ -5,7 +5,8 @@ Public API re-exported for convenience.
 __version__ = "1.0.0"
 
 from .config import MAX_WORKERS, MIN_WORKERS, Settings, load_settings, save_config
-from .catalogs import CatalogEntry, load_catalog, parse_valor
+from .catalogs import CatalogEntry, load_catalog, parse_valor, validate_catalog
+from .health import HealthResult, run_health_checks
 from .logs import LogRun, list_runs, read_log_text, read_results
 from .models import ReportRequest, ReportResult, BatchSummary
 from .exceptions import (
@@ -45,6 +46,9 @@ __all__ = [
     "CatalogEntry",
     "load_catalog",
     "parse_valor",
+    "validate_catalog",
+    "HealthResult",
+    "run_health_checks",
     "LogRun",
     "list_runs",
     "read_log_text",

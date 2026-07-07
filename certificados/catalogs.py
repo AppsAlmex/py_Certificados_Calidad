@@ -62,3 +62,38 @@ def parse_valor(text: str) -> str:
     if not text:
         return ""
     return text.split(" - ", 1)[0].strip()
+
+
+def validate_catalog(path: str | Path) -> List[str]:
+    """Valida un CSV de catalogo y devuelve la lista de problemas (vacia = OK).
+
+    Revisa: existe el archivo, tiene columna 'valor', sin valores vacios, sin
+    valores duplicados, y al menos una fila valida.
+    """
+    file = Path(path)
+    if not file.exists():
+        return [f"{file.name}: no existe"]
+    issues: List[str] = []
+    try:
+        with file.open("r", encoding="utf-8-sig", newline="") as fh:
+            reader = csv.DictReader(fh)
+            headers = [(h or "").strip().lower() for h in (reader.fieldnames or [])]
+            if "valor" not in headers:
+                return [f"{file.name}: falta la columna 'valor'"]
+            vistos: set = set()
+            validas = 0
+            for i, row in enumerate(reader, start=2):
+                norm = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+                valor = norm.get("valor", "")
+                if not valor:
+                    issues.append(f"{file.name} fila {i}: valor vacio")
+                    continue
+                if valor in vistos:
+                    issues.append(f"{file.name} fila {i}: valor duplicado '{valor}'")
+                vistos.add(valor)
+                validas += 1
+            if validas == 0:
+                issues.append(f"{file.name}: sin filas validas")
+    except OSError as exc:
+        issues.append(f"{file.name}: no se pudo leer ({exc})")
+    return issues

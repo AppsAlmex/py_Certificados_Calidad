@@ -27,6 +27,10 @@ for pkg in ("playwright",):
 
 # Plantillas empaquetadas (fallback si no se distribuye la carpeta layouts externa).
 datas += [("certificados/layouts", "certificados/layouts")]
+# Documentacion de ayuda (solo lectura, dentro del bundle).
+datas += [("docs", "docs")]
+
+ICON = "certificados/layouts/assets/LogoAlmex32.ico"
 
 
 a = Analysis(
@@ -52,7 +56,7 @@ if ONEFILE:
         [],
         name="CertificadosCalidad",
         console=CONSOLE,
-        icon=None,
+        icon=ICON,
     )
 else:
     # Modo carpeta (onedir): exe + _internal\. Distribuir la CARPETA completa.
@@ -63,7 +67,7 @@ else:
         exclude_binaries=True,
         name="CertificadosCalidad",
         console=CONSOLE,
-        icon=None,
+        icon=ICON,
     )
     coll = COLLECT(
         exe,

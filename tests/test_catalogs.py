@@ -1,6 +1,6 @@
 import pytest
 
-from certificados.catalogs import CatalogEntry, load_catalog, parse_valor
+from certificados.catalogs import CatalogEntry, load_catalog, parse_valor, validate_catalog
 from certificados.exceptions import CatalogError
 
 
@@ -54,3 +54,24 @@ def test_blank_rows_ignored(tmp_path):
 ])
 def test_parse_valor(text, expected):
     assert parse_valor(text) == expected
+
+
+def test_validate_catalog_ok(tmp_path):
+    path = write(tmp_path, "valor,descripcion\n1,Uno\n2,Dos\n")
+    assert validate_catalog(path) == []
+
+
+def test_validate_catalog_missing_file(tmp_path):
+    assert validate_catalog(tmp_path / "no.csv") == ["no.csv: no existe"]
+
+
+def test_validate_catalog_no_valor_column(tmp_path):
+    path = write(tmp_path, "codigo,descripcion\n1,x\n")
+    assert any("valor" in m for m in validate_catalog(path))
+
+
+def test_validate_catalog_duplicates_and_empty(tmp_path):
+    path = write(tmp_path, "valor,descripcion\n1,A\n1,B\n,C\n")
+    issues = validate_catalog(path)
+    assert any("duplicado" in m for m in issues)
+    assert any("vacio" in m for m in issues)

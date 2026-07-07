@@ -112,6 +112,27 @@ class BatchController:
         """Formatos con plantilla local (para poblar el combo cuando engine=local)."""
         return available_local_formats()
 
+    def run_health_checks(self, check_connectivity: bool = True):
+        """Corre el test entero de la app (config, catalogos, carpetas, red...)."""
+        from certificados.health import run_health_checks
+        return run_health_checks(self.config_path, self.env_path, check_connectivity)
+
+    def validate_catalogs(self):
+        """Valida los catalogos configurados. Devuelve [(campo, [problemas])]."""
+        from certificados.health import validate_configured_catalogs
+        return validate_configured_catalogs(self.config_path)
+
+    def list_docs(self):
+        """Lista los documentos de ayuda (.md/.txt) para la pestana Info."""
+        from certificados.runtime import docs_dir
+        d = docs_dir()
+        if not d.exists():
+            return []
+        return sorted(list(d.glob("*.md")) + list(d.glob("*.txt")))
+
+    def read_doc(self, path) -> str:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
+
     def read_catalogs(self) -> dict:
         """Carga los catalogos valor/descripcion definidos en [catalogs].
 

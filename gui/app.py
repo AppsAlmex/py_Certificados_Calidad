@@ -44,6 +44,7 @@ class CertificadosApp(tk.Tk):
         self.title("Certificados de Calidad")
         self.geometry("820x620")
         self.minsize(720, 560)
+        self._set_icon()
 
         self.controller = BatchController(config_path, env_path)
         self._queue: "queue.Queue" = queue.Queue()
@@ -52,6 +53,7 @@ class CertificadosApp(tk.Tk):
 
         # estado de la pestana individual
         self._single_vars: dict[str, tk.StringVar] = {}
+        self._catalog_combos: dict[str, ttk.Combobox] = {}
         self._queued: dict[str, ReportRequest] = {}
         self._single_next_id = 1
         try:
@@ -60,21 +62,24 @@ class CertificadosApp(tk.Tk):
             self._catalogs = {}
 
         self._vars: dict[str, tk.Variable] = {}
+
+        # Barra de herramientas: Settings (ventana aparte con sus pestanas internas).
+        toolbar = ttk.Frame(self)
+        toolbar.pack(fill="x", padx=8, pady=(8, 0))
+        ttk.Button(toolbar, text="Configuracion (Settings)", command=self._open_settings).pack(side="left")
+
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=8, pady=8)
         self._exec_tab = ttk.Frame(notebook)
         self._single_tab = ttk.Frame(notebook)
         self._logs_tab = ttk.Frame(notebook)
-        self._settings_tab = ttk.Frame(notebook)
         notebook.add(self._exec_tab, text="  Ejecucion (CSV)  ")
         notebook.add(self._single_tab, text="  Certificado individual  ")
         notebook.add(self._logs_tab, text="  Logs  ")
-        notebook.add(self._settings_tab, text="  Settings  ")
 
         self._build_exec_tab(self._exec_tab)
         self._build_single_tab(self._single_tab)
         self._build_logs_tab(self._logs_tab)
-        self._build_settings_tab(self._settings_tab)
 
         self._load_into_forms()
         self.after(100, self._poll_queue)
@@ -223,6 +228,7 @@ class CertificadosApp(tk.Tk):
             entries = self._catalogs.get(col, [])
             # editable: si el catalogo no cubre un valor, el usuario puede escribirlo.
             combo = ttk.Combobox(parent, textvariable=var, values=[e.display for e in entries])
+            self._catalog_combos[col] = combo  # para recargar catalogos en caliente
             if col == "formato":
                 self._formato_combo = combo  # se repuebla segun el motor elegido
             return combo
@@ -424,67 +430,40 @@ class CertificadosApp(tk.Tk):
         self._log_detail.insert("end", text)
         self._log_detail.configure(state="disabled")
 
-    # -------------------------------------------------------------- SETTINGS
-    def _build_settings_tab(self, parent: ttk.Frame) -> None:
-        form = ttk.LabelFrame(parent, text="Configuracion interna (se guarda en config.ini / .env)")
-        form.pack(fill="x", padx=8, pady=8)
-        form.columnconfigure(1, weight=1)
+    # ---------------------------------------------------- SETTINGS / CATALOGOS
+    def _open_settings(self) -> None:
+        """Abre Settings como ventana modal (bloquea la principal). Tiene pestanas
+        internas: Configuracion, Catalogos y Health check. Al cerrarse, la
+        principal recarga catalogos (pudieron editarse) y, si se guardo config,
+        recarga y valida."""
+        win = SettingsWindow(self, self.controller)
+        self.wait_window(win)
+        self._reload_catalogs(silent=True)  # reflejar cambios de catalogos siempre
+        if getattr(win, "saved", False):
+            self._load_into_forms()          # refresca combos runtime (reporte/workers/motor)
+            try:
+                self.controller.validate_settings()
+                messagebox.showinfo("Configuracion", "Cambios guardados y aplicados. Configuracion valida.")
+            except Exception as exc:
+                messagebox.showwarning(
+                    "Configuracion",
+                    f"Se guardo, pero la configuracion tiene un problema:\n{exc}",
+                )
 
-        rows = [
-            ("host", "Host:", tk.StringVar()),
-            ("service_path", "Service path:", tk.StringVar()),
-            ("timeout", "Read timeout (seg):", tk.StringVar()),
-            ("connect_timeout", "Connect timeout (seg):", tk.StringVar()),
-            ("output_dir", "Carpeta salida:", tk.StringVar()),
-            ("log_dir", "Carpeta logs:", tk.StringVar()),
-            ("user", "Usuario:", tk.StringVar()),
-            ("password", "Contrasena:", tk.StringVar()),
-        ]
-        for i, (key, label, var) in enumerate(rows):
-            ttk.Label(form, text=label).grid(row=i, column=0, sticky="w", padx=6, pady=4)
-            show = "*" if key == "password" else ""
-            ttk.Entry(form, textvariable=var, show=show).grid(row=i, column=1, sticky="ew", padx=6)
-            self._vars[key] = var
-
-        n = len(rows)
-        self._vars["verify_ssl"] = tk.BooleanVar(value=True)
-        ttk.Checkbutton(form, text="Verificar certificado TLS (verify_ssl)",
-                        variable=self._vars["verify_ssl"]).grid(row=n, column=1, sticky="w", padx=6, pady=4)
-
-        ttk.Label(form, text="Nivel de log:").grid(row=n + 1, column=0, sticky="w", padx=6, pady=4)
-        self._vars["log_level"] = tk.StringVar(value="INFO")
-        ttk.Combobox(form, textvariable=self._vars["log_level"], values=LOG_LEVELS,
-                     state="readonly", width=12).grid(row=n + 1, column=1, sticky="w", padx=6)
-
-        ttk.Label(form, text="Reporte por defecto:").grid(row=n + 2, column=0, sticky="w", padx=6, pady=4)
-        self._vars["default_report"] = tk.StringVar()
-        self._default_report_combo = ttk.Combobox(
-            form, textvariable=self._vars["default_report"], state="readonly"
-        )
-        self._default_report_combo.grid(row=n + 2, column=1, sticky="ew", padx=6)
-
-        ttk.Label(form, text=f"Max workers (1-{MAX_WORKERS}):").grid(
-            row=n + 3, column=0, sticky="w", padx=6, pady=4
-        )
-        self._vars["max_workers"] = tk.StringVar(value="1")
-        ttk.Spinbox(form, from_=MIN_WORKERS, to=MAX_WORKERS, textvariable=self._vars["max_workers"],
-                    width=6).grid(row=n + 3, column=1, sticky="w", padx=6)
-
-        ttk.Label(form, text="Motor de PDF:").grid(row=n + 4, column=0, sticky="w", padx=6, pady=4)
-        self._vars["pdf_engine"] = tk.StringVar(value="oracle")
-        ttk.Combobox(form, textvariable=self._vars["pdf_engine"], values=["oracle", "local"],
-                     state="readonly", width=12).grid(row=n + 4, column=1, sticky="w", padx=6)
-        ttk.Label(form, text="oracle = PDF original de BI Publisher  |  local = plantilla HTML nuestra",
-                  foreground="#666").grid(row=n + 5, column=1, sticky="w", padx=6)
-
-        cat = ttk.LabelFrame(parent, text="Catalogo de reportes (una linea:  clave = /ruta/reporte.xdo)")
-        cat.pack(fill="both", expand=True, padx=8, pady=8)
-        self._reports_text = tk.Text(cat, height=8, wrap="none")
-        self._reports_text.pack(fill="both", expand=True, padx=6, pady=6)
-
-        ttk.Button(parent, text="Guardar configuracion", command=self._on_save).pack(
-            side="right", padx=8, pady=6
-        )
+    def _reload_catalogs(self, silent: bool = False) -> None:
+        try:
+            self._catalogs = self.controller.read_catalogs()
+        except Exception as exc:
+            messagebox.showerror("Catalogos", f"No se pudieron recargar:\n{exc}")
+            return
+        for col, combo in self._catalog_combos.items():
+            if col == "formato":
+                continue  # lo maneja _update_formato_options segun el motor
+            combo["values"] = [e.display for e in self._catalogs.get(col, [])]
+        self._update_formato_options()
+        if not silent:
+            total = sum(len(v) for v in self._catalogs.values())
+            messagebox.showinfo("Catalogos", f"Catalogos recargados ({total} opciones).")
 
     # ------------------------------------------------------------------ DATA
     def _load_into_forms(self) -> None:
@@ -493,17 +472,6 @@ class CertificadosApp(tk.Tk):
         except Exception as exc:  # pragma: no cover - defensivo
             messagebox.showerror("Error", f"No se pudo leer la configuracion:\n{exc}")
             return
-
-        for key in ("host", "service_path", "timeout", "connect_timeout", "output_dir",
-                    "log_dir", "user", "password", "log_level", "default_report",
-                    "max_workers", "pdf_engine"):
-            if key in self._vars:
-                self._vars[key].set(raw[key])
-        self._vars["verify_ssl"].set(raw["verify_ssl"])
-
-        self._reports_text.delete("1.0", "end")
-        for clave, ruta in raw["reports"].items():
-            self._reports_text.insert("end", f"{clave} = {ruta}\n")
 
         self._refresh_report_combos(list(raw["reports"]), raw["default_report"])
         default_workers = int(raw["max_workers"] or 1)
@@ -518,25 +486,10 @@ class CertificadosApp(tk.Tk):
 
     def _refresh_report_combos(self, keys: list[str], default: str) -> None:
         self._report_combo["values"] = keys
-        self._default_report_combo["values"] = keys
         self._single_report_combo["values"] = keys
         chosen = default if default in keys else (keys[0] if keys else "")
         self._vars["report"].set(chosen)
         self._single_report_var.set(chosen)
-        if default in keys:
-            self._vars["default_report"].set(default)
-
-    def _parse_reports(self) -> dict:
-        reports: dict[str, str] = {}
-        for raw_line in self._reports_text.get("1.0", "end").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, path = line.partition("=")
-            key, path = key.strip(), path.strip()
-            if key and path:
-                reports[key] = path
-        return reports
 
     # --------------------------------------------------------------- EVENTS
     def _pick_csv(self) -> None:
@@ -546,38 +499,6 @@ class CertificadosApp(tk.Tk):
         )
         if path:
             self._vars["csv"].set(path)
-
-    def _on_save(self) -> None:
-        reports = self._parse_reports()
-        if not reports:
-            messagebox.showwarning("Catalogo vacio", "Agrega al menos un reporte (clave = ruta).")
-            return
-        try:
-            self.controller.save(
-                host=self._vars["host"].get().strip(),
-                service_path=self._vars["service_path"].get().strip(),
-                timeout=int(self._vars["timeout"].get()),
-                connect_timeout=int(self._vars["connect_timeout"].get()),
-                verify_ssl=self._vars["verify_ssl"].get(),
-                default_report=self._vars["default_report"].get().strip() or next(iter(reports)),
-                reports=reports,
-                max_workers=int(self._vars["max_workers"].get()),
-                output_dir=self._vars["output_dir"].get().strip() or "output",
-                log_dir=self._vars["log_dir"].get().strip() or "logs",
-                log_level=self._vars["log_level"].get(),
-                pdf_engine=self._vars["pdf_engine"].get(),
-                user=self._vars["user"].get().strip(),
-                password=self._vars["password"].get(),
-            )
-        except ValueError:
-            messagebox.showerror("Error", "Timeouts y workers deben ser numeros enteros.")
-            return
-        except Exception as exc:
-            messagebox.showerror("Error al guardar", str(exc))
-            return
-
-        self._refresh_report_combos(list(reports), self._vars["default_report"].get())
-        messagebox.showinfo("Guardado", "Configuracion guardada correctamente.")
 
     def _on_run(self) -> None:
         if self._running:
@@ -667,6 +588,281 @@ class CertificadosApp(tk.Tk):
         self._log.insert("end", text + "\n")
         self._log.see("end")
         self._log.configure(state="disabled")
+
+    def _set_icon(self) -> None:
+        try:
+            from certificados.runtime import icon_path
+            ico = icon_path()
+            if ico.exists():
+                self.iconbitmap(str(ico))  # aplica tambien a las ventanas hijas (Toplevel)
+        except Exception:
+            pass  # sin icono no es critico
+
+
+class SettingsWindow(tk.Toplevel):
+    """Ventana modal de configuracion. Bloquea la principal. Tiene pestanas:
+    Configuracion (guardar config.ini/.env), Catalogos (recargar/validar) y
+    Health check (test entero de la app)."""
+
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+        self.saved = False
+        self.title("Configuracion (Settings)")
+        self.geometry("700x600")
+        self.transient(parent)
+        self.grab_set()  # modal: bloquea la ventana principal
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+        self._vars: dict[str, tk.Variable] = {}
+        nb = ttk.Notebook(self)
+        nb.pack(fill="both", expand=True, padx=8, pady=8)
+        config_tab = ttk.Frame(nb)
+        catalog_tab = ttk.Frame(nb)
+        health_tab = ttk.Frame(nb)
+        info_tab = ttk.Frame(nb)
+        nb.add(config_tab, text="  Configuracion  ")
+        nb.add(catalog_tab, text="  Catalogos  ")
+        nb.add(health_tab, text="  Health check  ")
+        nb.add(info_tab, text="  Info / Ayuda  ")
+        self._build_config_tab(config_tab)
+        self._build_catalog_tab(catalog_tab)
+        self._build_health_tab(health_tab)
+        self._build_info_tab(info_tab)
+
+        self._load()
+
+    # ---- pestana Configuracion ----
+    def _build_config_tab(self, parent) -> None:
+        form = ttk.LabelFrame(parent, text="Configuracion interna (se guarda en config.ini / .env)")
+        form.pack(fill="x", padx=8, pady=8)
+        form.columnconfigure(1, weight=1)
+
+        rows = [
+            ("host", "Host:"), ("service_path", "Service path:"),
+            ("timeout", "Read timeout (seg):"), ("connect_timeout", "Connect timeout (seg):"),
+            ("output_dir", "Carpeta salida:"), ("log_dir", "Carpeta logs:"),
+            ("user", "Usuario:"), ("password", "Contrasena:"),
+        ]
+        for i, (key, label) in enumerate(rows):
+            ttk.Label(form, text=label).grid(row=i, column=0, sticky="w", padx=6, pady=4)
+            var = tk.StringVar()
+            self._vars[key] = var
+            show = "*" if key == "password" else ""
+            ttk.Entry(form, textvariable=var, show=show).grid(row=i, column=1, sticky="ew", padx=6)
+
+        n = len(rows)
+        self._vars["verify_ssl"] = tk.BooleanVar(value=True)
+        ttk.Checkbutton(form, text="Verificar certificado TLS (verify_ssl)",
+                        variable=self._vars["verify_ssl"]).grid(row=n, column=1, sticky="w", padx=6, pady=4)
+
+        ttk.Label(form, text="Nivel de log:").grid(row=n + 1, column=0, sticky="w", padx=6, pady=4)
+        self._vars["log_level"] = tk.StringVar(value="INFO")
+        ttk.Combobox(form, textvariable=self._vars["log_level"], values=LOG_LEVELS,
+                     state="readonly", width=12).grid(row=n + 1, column=1, sticky="w", padx=6)
+
+        ttk.Label(form, text="Reporte por defecto:").grid(row=n + 2, column=0, sticky="w", padx=6, pady=4)
+        self._vars["default_report"] = tk.StringVar()
+        self._default_report_combo = ttk.Combobox(
+            form, textvariable=self._vars["default_report"], state="readonly")
+        self._default_report_combo.grid(row=n + 2, column=1, sticky="ew", padx=6)
+
+        ttk.Label(form, text=f"Max workers (1-{MAX_WORKERS}):").grid(row=n + 3, column=0, sticky="w", padx=6, pady=4)
+        self._vars["max_workers"] = tk.StringVar(value="1")
+        ttk.Spinbox(form, from_=MIN_WORKERS, to=MAX_WORKERS, textvariable=self._vars["max_workers"],
+                    width=6).grid(row=n + 3, column=1, sticky="w", padx=6)
+
+        ttk.Label(form, text="Motor de PDF:").grid(row=n + 4, column=0, sticky="w", padx=6, pady=4)
+        self._vars["pdf_engine"] = tk.StringVar(value="oracle")
+        ttk.Combobox(form, textvariable=self._vars["pdf_engine"], values=["oracle", "local"],
+                     state="readonly", width=12).grid(row=n + 4, column=1, sticky="w", padx=6)
+
+        cat = ttk.LabelFrame(parent, text="Catalogo de reportes (una linea:  clave = /ruta/reporte.xdo)")
+        cat.pack(fill="both", expand=True, padx=8, pady=8)
+        self._reports_text = tk.Text(cat, height=7, wrap="none")
+        self._reports_text.pack(fill="both", expand=True, padx=6, pady=6)
+
+        btns = ttk.Frame(parent)
+        btns.pack(fill="x", padx=8, pady=(0, 8))
+        ttk.Button(btns, text="Guardar y aplicar", command=self._on_save).pack(side="right")
+        ttk.Button(btns, text="Cerrar", command=self.destroy).pack(side="right", padx=6)
+
+    # ---- pestana Catalogos ----
+    def _build_catalog_tab(self, parent) -> None:
+        top = ttk.Frame(parent)
+        top.pack(fill="x", padx=8, pady=8)
+        ttk.Button(top, text="Recargar y validar catalogos", command=self._reload_catalogs).pack(side="left")
+        ttk.Label(top, text="(los CSV de la carpeta 'catalogos')", foreground="#666").pack(side="left", padx=8)
+
+        cols = ("catalogo", "opciones", "estado", "detalle")
+        self._cat_tree = ttk.Treeview(parent, columns=cols, show="headings")
+        for col, text, width in (("catalogo", "Catalogo", 120), ("opciones", "Opciones", 80),
+                                 ("estado", "Estado", 80), ("detalle", "Detalle", 360)):
+            self._cat_tree.heading(col, text=text)
+            self._cat_tree.column(col, width=width, anchor="w")
+        self._cat_tree.tag_configure("ok", foreground="#1a7f37")
+        self._cat_tree.tag_configure("fail", foreground="#b42318")
+        self._cat_tree.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+
+    def _reload_catalogs(self) -> None:
+        self._cat_tree.delete(*self._cat_tree.get_children())
+        try:
+            catalogos = self.controller.read_catalogs()
+            problemas = dict(self.controller.validate_catalogs())
+        except Exception as exc:
+            messagebox.showerror("Catalogos", f"No se pudieron leer:\n{exc}", parent=self)
+            return
+        for campo in ("formato", "inspector", "planta_prod"):
+            issues = problemas.get(campo, [])
+            n = len(catalogos.get(campo, []))
+            estado = "OK" if not issues else "PROBLEMA"
+            self._cat_tree.insert("", "end",
+                                  values=(campo, n, estado, "; ".join(issues) if issues else "OK"),
+                                  tags=("ok" if not issues else "fail",))
+
+    # ---- pestana Health check ----
+    def _build_health_tab(self, parent) -> None:
+        bar = ttk.Frame(parent)
+        bar.pack(fill="x", padx=8, pady=8)
+        ttk.Button(bar, text="Correr health check", command=self._run_health).pack(side="left")
+        self._conn_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(bar, text="incluir conectividad al servicio", variable=self._conn_var).pack(side="left", padx=8)
+        self._health_summary = tk.StringVar(value="(sin correr)")
+        ttk.Label(parent, textvariable=self._health_summary).pack(anchor="w", padx=8)
+
+        cols = ("check", "estado", "detalle")
+        self._health_tree = ttk.Treeview(parent, columns=cols, show="headings")
+        for col, text, width in (("check", "Chequeo", 180), ("estado", "Estado", 70),
+                                 ("detalle", "Detalle", 400)):
+            self._health_tree.heading(col, text=text)
+            self._health_tree.column(col, width=width, anchor="w")
+        self._health_tree.tag_configure("ok", foreground="#1a7f37")
+        self._health_tree.tag_configure("fail", foreground="#b42318")
+        self._health_tree.pack(fill="both", expand=True, padx=8, pady=(4, 8))
+
+    def _run_health(self) -> None:
+        self._health_tree.delete(*self._health_tree.get_children())
+        self._health_summary.set("Ejecutando...")
+        self.update_idletasks()
+        try:
+            results = self.controller.run_health_checks(check_connectivity=self._conn_var.get())
+        except Exception as exc:
+            self._health_summary.set(f"Error: {exc}")
+            return
+        fallos = sum(1 for r in results if not r.ok)
+        for r in results:
+            self._health_tree.insert("", "end", values=(r.nombre, "OK" if r.ok else "FALLA", r.detalle),
+                                     tags=("ok" if r.ok else "fail",))
+        total = len(results)
+        self._health_summary.set(
+            f"{total - fallos}/{total} OK" + (f"  |  {fallos} con problemas" if fallos else "  |  todo bien"))
+
+    # ---- pestana Info / Ayuda (solo lectura) ----
+    def _build_info_tab(self, parent) -> None:
+        top = ttk.Frame(parent)
+        top.pack(fill="x", padx=8, pady=8)
+        ttk.Label(top, text="Documento:").pack(side="left")
+        self._doc_var = tk.StringVar()
+        self._doc_combo = ttk.Combobox(top, textvariable=self._doc_var, state="readonly", width=40)
+        self._doc_combo.pack(side="left", padx=6)
+        self._doc_combo.bind("<<ComboboxSelected>>", lambda _e: self._show_doc())
+
+        body = ttk.Frame(parent)
+        body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self._doc_text = tk.Text(body, wrap="word", state="disabled", padx=8, pady=8)
+        doc_scroll = ttk.Scrollbar(body, command=self._doc_text.yview)
+        self._doc_text.configure(yscrollcommand=doc_scroll.set)
+        self._doc_text.pack(side="left", fill="both", expand=True)
+        doc_scroll.pack(side="right", fill="y")
+
+        try:
+            self._docs = self.controller.list_docs()
+        except Exception:
+            self._docs = []
+        self._doc_combo["values"] = [p.stem for p in self._docs]
+        if self._docs:
+            self._doc_combo.current(0)
+            self._show_doc()
+        else:
+            self._set_doc_text("(No hay documentos de ayuda disponibles.)")
+
+    def _show_doc(self) -> None:
+        idx = self._doc_combo.current()
+        if idx < 0 or idx >= len(self._docs):
+            return
+        try:
+            contenido = self.controller.read_doc(self._docs[idx])
+        except Exception as exc:
+            contenido = f"No se pudo leer el documento:\n{exc}"
+        self._set_doc_text(contenido)
+
+    def _set_doc_text(self, text: str) -> None:
+        self._doc_text.configure(state="normal")
+        self._doc_text.delete("1.0", "end")
+        self._doc_text.insert("end", text)
+        self._doc_text.configure(state="disabled")  # solo lectura
+
+    # ---- datos / guardado ----
+    def _load(self) -> None:
+        try:
+            raw = self.controller.read_raw()
+        except Exception as exc:
+            messagebox.showerror("Error", f"No se pudo leer la configuracion:\n{exc}", parent=self)
+            return
+        for key in ("host", "service_path", "timeout", "connect_timeout", "output_dir",
+                    "log_dir", "user", "password", "log_level", "default_report",
+                    "max_workers", "pdf_engine"):
+            if key in self._vars:
+                self._vars[key].set(raw[key])
+        self._vars["verify_ssl"].set(raw["verify_ssl"])
+        self._default_report_combo["values"] = list(raw["reports"])
+        self._reports_text.delete("1.0", "end")
+        for clave, ruta in raw["reports"].items():
+            self._reports_text.insert("end", f"{clave} = {ruta}\n")
+        self._reload_catalogs()
+
+    def _parse_reports(self) -> dict:
+        reports: dict[str, str] = {}
+        for raw_line in self._reports_text.get("1.0", "end").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, path = line.partition("=")
+            key, path = key.strip(), path.strip()
+            if key and path:
+                reports[key] = path
+        return reports
+
+    def _on_save(self) -> None:
+        reports = self._parse_reports()
+        if not reports:
+            messagebox.showwarning("Catalogo vacio", "Agrega al menos un reporte (clave = ruta).", parent=self)
+            return
+        try:
+            self.controller.save(
+                host=self._vars["host"].get().strip(),
+                service_path=self._vars["service_path"].get().strip(),
+                timeout=int(self._vars["timeout"].get()),
+                connect_timeout=int(self._vars["connect_timeout"].get()),
+                verify_ssl=self._vars["verify_ssl"].get(),
+                default_report=self._vars["default_report"].get().strip() or next(iter(reports)),
+                reports=reports,
+                max_workers=int(self._vars["max_workers"].get()),
+                output_dir=self._vars["output_dir"].get().strip() or "output",
+                log_dir=self._vars["log_dir"].get().strip() or "logs",
+                log_level=self._vars["log_level"].get(),
+                pdf_engine=self._vars["pdf_engine"].get(),
+                user=self._vars["user"].get().strip(),
+                password=self._vars["password"].get(),
+            )
+        except ValueError:
+            messagebox.showerror("Error", "Timeouts y workers deben ser numeros enteros.", parent=self)
+            return
+        except Exception as exc:
+            messagebox.showerror("Error al guardar", str(exc), parent=self)
+            return
+        self.saved = True
+        self.destroy()  # la principal recarga y valida al cerrarse
 
 
 def launch(config_path: str = "config.ini", env_path: str = ".env") -> None:
