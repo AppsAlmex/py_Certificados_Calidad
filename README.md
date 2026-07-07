@@ -247,6 +247,32 @@ python main.py --csv datos.csv --workers 4
 No se modificó `BatchProcessor` ni el gateway (OCP/LSP): la concurrencia es una
 clase nueva, opt-in.
 
+## 5c. Compilar a .exe (v1.0.0, sin Python en el equipo del usuario)
+
+Se empaqueta con **PyInstaller**. Los usuarios no necesitan Python. Dos modos:
+
+```powershell
+.\build.ps1              # onedir  -> carpeta dist\CertificadosCalidad\
+.\build.ps1 -OneFile     # onefile -> un solo dist\CertificadosCalidad.exe
+.\build.ps1 -Chromium    # ademas empaqueta Chromium (motor local); combinable
+```
+
+**onefile (recomendado para distribuir):** un único `.exe` autocontenido. Junto a
+él van los editables: `config.ini`, `.env`, `catalogos\`, `layouts\`, y se crean
+`output\`/`logs\`. No hay `_internal\` que se pueda dejar atrás.
+
+**onedir:** `CertificadosCalidad.exe` + carpeta `_internal\` (runtime/librerías) +
+los mismos editables. Arranca más rápido, **pero** debes distribuir la CARPETA
+completa: si mueves solo el `.exe`, falla con *"no puede cargar python313.dll"*
+(el exe busca `python313.dll` en `_internal\`).
+
+Notas comunes:
+- Al correr como `.exe`, la app trabaja en su propia carpeta: `config.ini`, `.env`,
+  `catalogos\`, `layouts\`, `output\`, `logs\` se leen/escriben ahí (editables sin
+  recompilar).
+- **Motor de PDF:** `oracle` funciona sin nada extra. Para `local` compila con
+  `-Chromium`; si no está, `local` muestra un error controlado (no crashea).
+
 ## 6. Errores comunes
 
 | Síntoma | Causa | Solución |

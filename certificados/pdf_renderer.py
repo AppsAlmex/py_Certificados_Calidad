@@ -19,8 +19,21 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .certificate_data import CertificateData, parse_certificate
 from .exceptions import LayoutError
+from .runtime import app_dir, is_frozen, resource_dir
 
-LAYOUTS_DIR = Path(__file__).parent / "layouts"
+
+def _default_layouts_dir() -> Path:
+    """layouts editable junto al .exe si existe; si no, el empaquetado."""
+    packaged = Path(__file__).resolve().parent / "layouts"
+    if is_frozen():
+        external = app_dir() / "layouts"
+        if external.is_dir():
+            return external
+        return resource_dir() / "certificados" / "layouts"
+    return packaged
+
+
+LAYOUTS_DIR = _default_layouts_dir()
 
 
 def available_local_formats(templates_dir=LAYOUTS_DIR) -> List[str]:

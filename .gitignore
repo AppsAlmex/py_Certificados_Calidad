@@ -8,6 +8,10 @@ logs/
 *.xlsx
 *.csv
 
+# Build artifacts (PyInstaller)
+build/
+dist/
+
 # Python
 __pycache__/
 *.py[cod]

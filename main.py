@@ -7,7 +7,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from pathlib import Path
+
+if getattr(sys, "frozen", False):  # compilado: trabajar junto al .exe
+    _base = Path(sys.executable).resolve().parent
+    os.chdir(_base)
+    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(_base / "ms-playwright"))
 
 from certificados import (
     BatchProcessor,
