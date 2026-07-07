@@ -75,3 +75,22 @@ def test_validate_catalog_duplicates_and_empty(tmp_path):
     issues = validate_catalog(path)
     assert any("duplicado" in m for m in issues)
     assert any("vacio" in m for m in issues)
+
+
+def test_load_catalog_cp1252_accents(tmp_path):
+    # CSV guardado por Excel en espanol (cp1252) con acentos -> se lee bien
+    path = tmp_path / "c.csv"
+    path.write_bytes("valor,descripcion\n1,José Pérez Núñez\n".encode("cp1252"))
+    assert load_catalog(path)[0].descripcion == "José Pérez Núñez"
+
+
+def test_load_catalog_utf8_bom_accents(tmp_path):
+    path = tmp_path / "c.csv"
+    path.write_bytes(b"\xef\xbb\xbf" + "valor,descripcion\n1,Ángel Muñoz\n".encode("utf-8"))
+    assert load_catalog(path)[0].descripcion == "Ángel Muñoz"
+
+
+def test_validate_catalog_detects_lost_chars(tmp_path):
+    path = tmp_path / "c.csv"
+    path.write_bytes(b"valor,descripcion\n1,Jos\xef\xbf\xbd Perez\n")  # U+FFFD grabado
+    assert any("caracteres perdidos" in m for m in validate_catalog(path))
