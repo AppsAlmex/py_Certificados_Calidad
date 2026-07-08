@@ -1,0 +1,66 @@
+name: Build & Release
+
+# Compila el .exe en Windows y lo publica como artefacto.
+# - push a main / tags v* / manual  -> corre tests y build, sube artefacto
+# - tag  v*                          -> ademas crea un Release con el .zip adjunto
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # necesario para crear Releases en tags
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Crear venv e instalar dependencias
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+      - name: Instalar Chromium (Playwright)
+        shell: pwsh
+        run: .\.venv\Scripts\python.exe -m playwright install chromium
+
+      - name: Tests
+        shell: pwsh
+        run: .\.venv\Scripts\python.exe -m pytest
+
+      - name: Compilar (onedir + Chromium)
+        shell: pwsh
+        run: .\build.ps1 -Chromium
+
+      - name: Empaquetar ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist\CertificadosCalidad\*" `
+            -DestinationPath "CertificadosCalidad-${{ github.sha }}.zip" -Force
+
+      - name: Subir artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: CertificadosCalidad-${{ github.sha }}
+          path: CertificadosCalidad-${{ github.sha }}.zip
+          retention-days: 30
+
+      - name: Publicar Release (solo tags)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: CertificadosCalidad-${{ github.sha }}.zip
+          generate_release_notes: true

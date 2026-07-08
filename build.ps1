@@ -31,7 +31,12 @@ Write-Host "== Copiando archivos editables junto al exe ($dist) ==" -ForegroundC
 Copy-Item "config.ini" $dist -Force
 if (Test-Path ".env")             { Copy-Item ".env" $dist -Force }
 elseif (Test-Path ".env.example") { Copy-Item ".env.example" "$dist\.env" -Force }
-Copy-Item "catalogos" $dist -Recurse -Force
+if (Test-Path ".\catalogos") {
+  Copy-Item "catalogos" $dist -Recurse -Force
+} else {
+  # En CI los catalogos (*.csv) estan gitignored: deja la carpeta vacia lista para el usuario.
+  New-Item -ItemType Directory -Force "$dist\catalogos" | Out-Null
+}
 Copy-Item "certificados\layouts" "$dist\layouts" -Recurse -Force
 New-Item -ItemType Directory -Force "$dist\output" | Out-Null
 New-Item -ItemType Directory -Force "$dist\logs"   | Out-Null

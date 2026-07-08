@@ -43,7 +43,7 @@ class CertificadosApp(tk.Tk):
         super().__init__()
         self.title("Certificados de Calidad")
         self.geometry("820x620")
-        self.minsize(720, 560)
+        self.minsize(720, 660)
         self._set_icon()
 
         self.controller = BatchController(config_path, env_path)
