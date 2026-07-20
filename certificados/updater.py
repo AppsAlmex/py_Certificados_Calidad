@@ -189,36 +189,53 @@ def _launch_apply_bat(app_dir: Path, stage: Path) -> None:
     """Escribe y lanza el .bat que espera el cierre de la app, copia la nueva
     version sobre la carpeta y relanza el .exe."""
     bat = app_dir / _BAT_NAME
+    log = app_dir / "update.log"
     pid = os.getpid()
     exe_path = app_dir / _EXE_NAME
+    stage_root = app_dir / _STAGE_DIR
+    # NOTA: se usa 'ping' en vez de 'timeout' para dormir: 'timeout' aborta con
+    # "Input redirection is not supported" cuando el proceso no tiene consola
+    # interactiva (que es el caso al lanzarlo en segundo plano). 'ping' no la necesita.
     script = f"""@echo off
-setlocal
-rem Esperar a que el proceso actual termine.
+setlocal enableextensions
+set "LOG={log}"
+echo [%date% %time%] iniciando actualizacion a {exe_path} > "%LOG%"
+
+rem 1) Esperar a que el proceso anterior cierre del todo (libera los archivos).
 :waitloop
-tasklist /fi "PID eq {pid}" 2>nul | find "{pid}" >nul
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
+tasklist /fi "PID eq {pid}" /nh 2>nul | find "{pid}" >nul
+if %errorlevel%==0 (
+    ping -n 2 127.0.0.1 >nul
     goto waitloop
 )
-rem Reemplazar SOLO codigo (exe, _internal, layouts, docs). Se EXCLUYEN los
-rem datos del usuario para no borrar credenciales/config/catalogos:
-rem   /XF .env config.ini   -> archivos de usuario
-rem   /XD catalogos logs output ms-playwright -> carpetas de usuario/datos
-robocopy "{stage}" "{app_dir}" /E /MOVE /XF .env config.ini /XD catalogos logs output ms-playwright /NFL /NDL /NJH /NJS /NC /NS /NP >nul
-rem Limpiar staging temporal si quedo algo.
-rmdir /s /q "{app_dir / _STAGE_DIR}" >nul 2>&1
-rem Relanzar la aplicacion.
+
+rem 2) Margen extra: Windows tarda un instante en soltar los locks de _internal.
+ping -n 3 127.0.0.1 >nul
+
+rem 3) Copiar la nueva version SOBRE la carpeta. /R:30 /W:1 = reintenta hasta ~30s
+rem    si algun archivo sigue bloqueado. Se EXCLUYEN datos de usuario:
+rem      /XF .env config.ini            -> archivos de usuario
+rem      /XD catalogos logs output ms-playwright -> carpetas de usuario/datos
+robocopy "{stage}" "{app_dir}" /E /MOVE /R:30 /W:1 /XF .env config.ini /XD catalogos logs output ms-playwright >> "%LOG%" 2>&1
+set "RC=%errorlevel%"
+echo [%date% %time%] robocopy termino con codigo %RC% (0-7 = ok) >> "%LOG%"
+
+rem 4) Limpiar staging y relanzar la aplicacion ya actualizada.
+rmdir /s /q "{stage_root}" >nul 2>&1
+echo [%date% %time%] relanzando... >> "%LOG%"
 start "" "{exe_path}"
-rem Autoborrado del .bat.
 del "%~f0"
 """
     bat.write_text(script, encoding="utf-8")
 
-    DETACHED = 0x00000008  # DETACHED_PROCESS
-    NEW_GROUP = 0x00000200  # CREATE_NEW_PROCESS_GROUP
+    # CREATE_NO_WINDOW: el .bat corre oculto pero CON consola valida (robocopy/ping
+    # la necesitan). CREATE_NEW_PROCESS_GROUP + proceso separado -> sobrevive a que
+    # esta app se cierre con os._exit().
+    NO_WINDOW = 0x08000000   # CREATE_NO_WINDOW
+    NEW_GROUP = 0x00000200   # CREATE_NEW_PROCESS_GROUP
     subprocess.Popen(
         ["cmd.exe", "/c", str(bat)],
         cwd=str(app_dir),
-        creationflags=DETACHED | NEW_GROUP,
+        creationflags=NO_WINDOW | NEW_GROUP,
         close_fds=True,
     )

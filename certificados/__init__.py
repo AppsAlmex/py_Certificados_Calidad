@@ -2,7 +2,7 @@
 
 Public API re-exported for convenience.
 """
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 
 from .config import MAX_WORKERS, MIN_WORKERS, Settings, load_settings, save_config
 from .catalogs import CatalogEntry, load_catalog, parse_valor, validate_catalog
