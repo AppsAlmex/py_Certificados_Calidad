@@ -41,6 +41,29 @@ jobs:
         shell: pwsh
         run: .\.venv\Scripts\python.exe -m pytest
 
+      - name: Fijar version desde el tag (solo tags)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}" -replace '^v',''
+          $init = "certificados/__init__.py"
+          (Get-Content $init -Raw) `
+            -replace '__version__\s*=\s*".*?"', "__version__ = ""$ver""" `
+            | Set-Content $init -Encoding utf8
+          Write-Host "Version fijada a $ver"
+
+      - name: Inyectar token de autoactualizacion
+        shell: pwsh
+        env:
+          UPDATE_TOKEN: ${{ secrets.UPDATE_TOKEN }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:UPDATE_TOKEN)) {
+            Write-Host "::warning::Secret UPDATE_TOKEN vacio; el .exe no podra autoactualizarse."
+          } else {
+            "TOKEN = ""$env:UPDATE_TOKEN""" | Set-Content "certificados/_update_token.py" -Encoding utf8
+            Write-Host "Token inyectado en certificados/_update_token.py"
+          }
+
       - name: Compilar (onedir + Chromium)
         shell: pwsh
         run: .\build.ps1 -Chromium

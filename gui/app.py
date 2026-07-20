@@ -8,10 +8,11 @@ Dos pestanas:
 from __future__ import annotations
 
 import queue
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from certificados import MAX_WORKERS, MIN_WORKERS
+from certificados import MAX_WORKERS, MIN_WORKERS, __version__
 from certificados.catalogs import parse_valor
 from certificados.csv_reader import FORMAT_COLUMN, NAME_COLUMN, PARAM_COLUMNS
 from certificados.models import ReportRequest
@@ -67,6 +68,8 @@ class CertificadosApp(tk.Tk):
         toolbar = ttk.Frame(self)
         toolbar.pack(fill="x", padx=8, pady=(8, 0))
         ttk.Button(toolbar, text="Configuracion (Settings)", command=self._open_settings).pack(side="left")
+        ttk.Button(toolbar, text="Buscar actualizaciones", command=self._check_updates_manual).pack(side="left", padx=6)
+        ttk.Label(toolbar, text=f"v{__version__}").pack(side="right")
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=8, pady=8)
@@ -83,6 +86,8 @@ class CertificadosApp(tk.Tk):
 
         self._load_into_forms()
         self.after(100, self._poll_queue)
+        # Chequeo de actualizaciones en segundo plano al arrancar (silencioso si no hay).
+        self.after(1500, lambda: self._check_updates_async(silent=True))
 
     # ------------------------------------------------------------------ EXEC
     def _build_exec_tab(self, parent: ttk.Frame) -> None:
@@ -449,6 +454,73 @@ class CertificadosApp(tk.Tk):
                     "Configuracion",
                     f"Se guardo, pero la configuracion tiene un problema:\n{exc}",
                 )
+
+    # --------------------------------------------------------------- UPDATES
+    def _check_updates_manual(self) -> None:
+        """Boton 'Buscar actualizaciones': chequea y avisa el resultado siempre."""
+        self._check_updates_async(silent=False)
+
+    def _check_updates_async(self, silent: bool) -> None:
+        """Lanza el chequeo en un hilo para no congelar la GUI. El resultado se
+        entrega en el hilo de Tk con ``self.after``."""
+        def worker():
+            try:
+                from certificados import updater
+                info = updater.check_for_update()
+                self.after(0, lambda: self._on_update_checked(info, silent))
+            except Exception as exc:  # red/auth: solo molestar si fue manual
+                if not silent:
+                    self.after(0, lambda: messagebox.showwarning(
+                        "Actualizaciones",
+                        f"No se pudo verificar actualizaciones:\n{exc}", parent=self))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_update_checked(self, info, silent: bool) -> None:
+        if info is None:
+            if not silent:
+                messagebox.showinfo(
+                    "Actualizaciones",
+                    f"Estas en la ultima version (v{__version__}).", parent=self)
+            return
+        notes = (info.notes or "").strip()
+        if len(notes) > 800:
+            notes = notes[:800] + "..."
+        if not messagebox.askyesno(
+            "Actualizacion disponible",
+            f"Version nueva: {info.tag}  (tienes v{__version__})\n\n"
+            f"{notes}\n\n¿Descargar e instalar ahora? La app se cerrara y "
+            f"volvera a abrir sola.",
+            parent=self,
+        ):
+            return
+        self._apply_update(info)
+
+    def _apply_update(self, info) -> None:
+        """Descarga con barra de progreso modal y aplica. No retorna si tiene
+        exito (el proceso se cierra para que el .bat reemplace archivos)."""
+        from certificados import updater
+
+        win = tk.Toplevel(self)
+        win.title("Actualizando")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+        ttk.Label(win, text=f"Descargando {info.tag}...").pack(padx=16, pady=(14, 6))
+        bar = ttk.Progressbar(win, length=320, mode="determinate", maximum=100)
+        bar.pack(padx=16, pady=(0, 14))
+
+        def progress(done, total):
+            pct = int(done * 100 / total) if total else 0
+            self.after(0, lambda: bar.configure(value=pct))
+
+        def worker():
+            try:
+                updater.download_and_apply(info, progress_cb=progress)
+            except Exception as exc:
+                self.after(0, lambda: (win.destroy(), messagebox.showerror(
+                    "Actualizaciones", f"Fallo la actualizacion:\n{exc}", parent=self)))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _reload_catalogs(self, silent: bool = False) -> None:
         try:

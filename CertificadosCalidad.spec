@@ -18,6 +18,11 @@ datas = []
 binaries = []
 hiddenimports = ["lxml._elementpath"]
 
+# Token de autoactualizacion (lo escribe CI desde un Secret; import dinamico en
+# certificados/updater.py que PyInstaller no detecta solo). Solo si existe.
+if os.path.exists("certificados/_update_token.py"):
+    hiddenimports.append("certificados._update_token")
+
 # Playwright trae un driver (node) y metadatos que hay que empaquetar completos.
 for pkg in ("playwright",):
     d, b, h = collect_all(pkg)

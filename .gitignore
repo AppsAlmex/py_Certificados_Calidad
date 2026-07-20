@@ -1,5 +1,6 @@
 # Secrets
 .env
+certificados/_update_token.py
 
 # Runtime output
 output/
