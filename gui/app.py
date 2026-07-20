@@ -68,7 +68,6 @@ class CertificadosApp(tk.Tk):
         toolbar = ttk.Frame(self)
         toolbar.pack(fill="x", padx=8, pady=(8, 0))
         ttk.Button(toolbar, text="Configuracion (Settings)", command=self._open_settings).pack(side="left")
-        ttk.Button(toolbar, text="Buscar actualizaciones", command=self._check_updates_manual).pack(side="left", padx=6)
         ttk.Label(toolbar, text=f"v{__version__}").pack(side="right")
 
         notebook = ttk.Notebook(self)
@@ -456,10 +455,8 @@ class CertificadosApp(tk.Tk):
                 )
 
     # --------------------------------------------------------------- UPDATES
-    def _check_updates_manual(self) -> None:
-        """Boton 'Buscar actualizaciones': chequea y avisa el resultado siempre."""
-        self._check_updates_async(silent=False)
-
+    # Chequeo automatico al arrancar (silencioso). El chequeo manual vive en la
+    # pestana "Actualizaciones" de SettingsWindow.
     def _check_updates_async(self, silent: bool) -> None:
         """Lanza el chequeo en un hilo para no congelar la GUI. El resultado se
         entrega en el hilo de Tk con ``self.after``."""
@@ -693,14 +690,17 @@ class SettingsWindow(tk.Toplevel):
         catalog_tab = ttk.Frame(nb)
         health_tab = ttk.Frame(nb)
         info_tab = ttk.Frame(nb)
+        updates_tab = ttk.Frame(nb)
         nb.add(config_tab, text="  Configuracion  ")
         nb.add(catalog_tab, text="  Catalogos  ")
         nb.add(health_tab, text="  Health check  ")
         nb.add(info_tab, text="  Info / Ayuda  ")
+        nb.add(updates_tab, text="  Actualizaciones  ")
         self._build_config_tab(config_tab)
         self._build_catalog_tab(catalog_tab)
         self._build_health_tab(health_tab)
         self._build_info_tab(info_tab)
+        self._build_updates_tab(updates_tab)
 
         self._load()
 
@@ -873,6 +873,100 @@ class SettingsWindow(tk.Toplevel):
         self._doc_text.delete("1.0", "end")
         self._doc_text.insert("end", text)
         self._doc_text.configure(state="disabled")  # solo lectura
+
+    # ---- pestana Actualizaciones ----
+    def _build_updates_tab(self, parent) -> None:
+        box = ttk.LabelFrame(parent, text="Actualizaciones de la aplicacion")
+        box.pack(fill="x", padx=8, pady=8)
+
+        ttk.Label(box, text=f"Version instalada:  v{__version__}").pack(anchor="w", padx=8, pady=(8, 2))
+
+        bar = ttk.Frame(box)
+        bar.pack(fill="x", padx=8, pady=6)
+        self._upd_btn = ttk.Button(bar, text="Buscar actualizaciones", command=self._on_check_updates)
+        self._upd_btn.pack(side="left")
+
+        self._upd_status = tk.StringVar(value="Pulsa 'Buscar actualizaciones' para consultar la ultima version.")
+        ttk.Label(box, textvariable=self._upd_status, wraplength=620, justify="left").pack(
+            anchor="w", padx=8, pady=(2, 8))
+
+        self._upd_progress = ttk.Progressbar(box, length=620, mode="determinate", maximum=100)
+        # se muestra solo durante la descarga (pack cuando haga falta)
+
+        notes = ttk.LabelFrame(parent, text="Notas de la version disponible")
+        notes.pack(fill="both", expand=True, padx=8, pady=8)
+        self._upd_notes = tk.Text(notes, wrap="word", state="disabled", height=10, padx=8, pady=8)
+        nscroll = ttk.Scrollbar(notes, command=self._upd_notes.yview)
+        self._upd_notes.configure(yscrollcommand=nscroll.set)
+        self._upd_notes.pack(side="left", fill="both", expand=True)
+        nscroll.pack(side="right", fill="y")
+
+    def _set_upd_notes(self, text: str) -> None:
+        self._upd_notes.configure(state="normal")
+        self._upd_notes.delete("1.0", "end")
+        self._upd_notes.insert("end", text)
+        self._upd_notes.configure(state="disabled")
+
+    def _on_check_updates(self) -> None:
+        """Chequeo manual desde la pestana (hilo aparte, no congela la ventana)."""
+        self._upd_btn.configure(state="disabled")
+        self._upd_status.set("Buscando actualizaciones...")
+        self._set_upd_notes("")
+
+        def worker():
+            try:
+                from certificados import updater
+                info = updater.check_for_update()
+                self.after(0, lambda: self._on_updates_checked(info))
+            except Exception as exc:
+                self.after(0, lambda: self._on_updates_error(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_updates_error(self, exc) -> None:
+        self._upd_btn.configure(state="normal")
+        self._upd_status.set(f"No se pudo verificar: {exc}")
+
+    def _on_updates_checked(self, info) -> None:
+        self._upd_btn.configure(state="normal")
+        if info is None:
+            self._upd_status.set(f"Estas en la ultima version (v{__version__}).")
+            return
+        self._upd_status.set(f"Version disponible: {info.tag}  (tienes v{__version__}).")
+        self._set_upd_notes((info.notes or "").strip() or "(sin notas)")
+        if messagebox.askyesno(
+            "Actualizacion disponible",
+            f"Version nueva: {info.tag}  (tienes v{__version__})\n\n"
+            f"¿Descargar e instalar ahora? La app se cerrara y volvera a abrir sola.",
+            parent=self,
+        ):
+            self._download_update(info)
+
+    def _download_update(self, info) -> None:
+        from certificados import updater
+
+        self._upd_btn.configure(state="disabled")
+        self._upd_status.set(f"Descargando {info.tag}...")
+        self._upd_progress.pack(fill="x", padx=8, pady=(0, 8))
+        self._upd_progress.configure(value=0)
+
+        def progress(done, total):
+            pct = int(done * 100 / total) if total else 0
+            self.after(0, lambda: self._upd_progress.configure(value=pct))
+
+        def worker():
+            try:
+                updater.download_and_apply(info, progress_cb=progress)
+            except Exception as exc:
+                self.after(0, lambda: self._on_download_error(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_download_error(self, exc) -> None:
+        self._upd_progress.pack_forget()
+        self._upd_btn.configure(state="normal")
+        self._upd_status.set(f"Fallo la actualizacion: {exc}")
+        messagebox.showerror("Actualizaciones", f"Fallo la actualizacion:\n{exc}", parent=self)
 
     # ---- datos / guardado ----
     def _load(self) -> None:
