@@ -1,11 +1,11 @@
 name: Build & Release
 
-# Compila el .exe en Windows y lo publica como artefacto.
-# - push a main / tags v* / manual  -> corre tests y build, sube artefacto
-# - tag  v*                          -> ademas crea un Release con el .zip adjunto
+# Compila el .exe en Windows y lo publica como Release.
+# - tag  v*   -> corre tests, build, sube artefacto y crea el Release con el .zip
+# - manual    -> build de prueba (sin Release)
+# Los checks de Pull Request (tests + coverage) viven en ci.yml (mas rapido).
 on:
   push:
-    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
