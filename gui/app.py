@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -74,13 +75,16 @@ class CertificadosApp(tk.Tk):
         notebook.pack(fill="both", expand=True, padx=8, pady=8)
         self._exec_tab = ttk.Frame(notebook)
         self._single_tab = ttk.Frame(notebook)
+        self._label_tab = ttk.Frame(notebook)
         self._logs_tab = ttk.Frame(notebook)
         notebook.add(self._exec_tab, text="  Ejecucion (CSV)  ")
         notebook.add(self._single_tab, text="  Certificado individual  ")
+        notebook.add(self._label_tab, text="  Etiqueta  ")
         notebook.add(self._logs_tab, text="  Logs  ")
 
         self._build_exec_tab(self._exec_tab)
         self._build_single_tab(self._single_tab)
+        self._build_label_tab(self._label_tab)
         self._build_logs_tab(self._logs_tab)
 
         self._load_into_forms()
@@ -320,6 +324,66 @@ class CertificadosApp(tk.Tk):
         self.controller.process_requests_async(
             pending, self._queue, report=report, workers=workers, engine=engine
         )
+
+    # --------------------------------------------------------------- ETIQUETA
+    def _build_label_tab(self, parent: ttk.Frame) -> None:
+        """Formulario para generar una etiqueta PDF de 3x2 pulgadas."""
+        form = ttk.LabelFrame(parent, text="Datos de la etiqueta (empresa: ALMIDONES MEXICANOS S.A. DE C.V.)")
+        form.pack(fill="x", padx=8, pady=8)
+        form.columnconfigure(1, weight=1)
+
+        self._label_vars: dict[str, tk.StringVar] = {}
+        campos = [
+            ("cliente", "Cliente:"), ("sucursal", "Sucursal:"),
+            ("producto", "Producto:"), ("transporte", "Transporte:"),
+            ("lote", "Lote:"), ("equipo", "Equipo:"), ("fecha", "Fecha:"),
+        ]
+        for i, (key, label) in enumerate(campos):
+            ttk.Label(form, text=label).grid(row=i, column=0, sticky="w", padx=6, pady=4)
+            var = tk.StringVar()
+            self._label_vars[key] = var
+            ttk.Entry(form, textvariable=var).grid(row=i, column=1, sticky="ew", padx=6)
+        # Fecha por defecto = ahora (editable).
+        self._label_vars["fecha"].set(datetime.now().strftime("%d/%m/%Y %H:%M"))
+
+        actions = ttk.Frame(parent)
+        actions.pack(fill="x", padx=8, pady=(0, 8))
+        self._label_btn = ttk.Button(actions, text="Generar PDF", command=self._on_generate_label)
+        self._label_btn.pack(side="left")
+        ttk.Button(actions, text="Limpiar", command=self._clear_label_form).pack(side="left", padx=6)
+
+        self._label_status = tk.StringVar(value="Captura los datos y pulsa 'Generar PDF'.")
+        ttk.Label(parent, textvariable=self._label_status, wraplength=760, justify="left").pack(
+            anchor="w", padx=8, pady=(0, 8))
+
+    def _clear_label_form(self) -> None:
+        for key, var in self._label_vars.items():
+            var.set("")
+        self._label_vars["fecha"].set(datetime.now().strftime("%d/%m/%Y %H:%M"))
+        self._label_status.set("Formulario limpio.")
+
+    def _on_generate_label(self) -> None:
+        campos = {k: v.get().strip() for k, v in self._label_vars.items()}
+        self._label_btn.configure(state="disabled")
+        self._label_status.set("Generando etiqueta...")
+
+        def worker():
+            try:
+                path = self.controller.generate_label(campos)
+                self.after(0, lambda: self._on_label_done(path))
+            except Exception as exc:
+                self.after(0, lambda: self._on_label_error(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_label_done(self, path) -> None:
+        self._label_btn.configure(state="normal")
+        self._label_status.set(f"Etiqueta generada: {path}")
+
+    def _on_label_error(self, exc) -> None:
+        self._label_btn.configure(state="normal")
+        self._label_status.set(f"Error al generar la etiqueta: {exc}")
+        messagebox.showerror("Etiqueta", f"No se pudo generar la etiqueta:\n{exc}", parent=self)
 
     # ------------------------------------------------------------------ LOGS
     def _build_logs_tab(self, parent: ttk.Frame) -> None:
