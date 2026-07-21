@@ -5,6 +5,7 @@ Tkinter en si no se testea aqui (requiere display); su logica esta en el
 controlador, que si es testeable.
 """
 import logging
+import os
 import queue
 import time
 from pathlib import Path
@@ -16,6 +17,24 @@ from certificados.config import load_settings, save_config
 from certificados.exceptions import ConfigError
 from certificados.models import ReportRequest, ReportResult
 from gui.controller import BatchController, QueueLogHandler
+
+
+def test_relative_config_paths_anchored_absolute():
+    # Ruta relativa -> se ancla a ruta absoluta (evita que cambios de cwd por los
+    # dialogos de archivo hagan que la config se guarde/lea en carpetas distintas).
+    ctrl = BatchController("config.ini", ".env")
+    assert os.path.isabs(ctrl.config_path)
+    assert os.path.isabs(ctrl.env_path)
+    assert ctrl.config_path.endswith("config.ini")
+    assert ctrl.env_path.endswith(".env")
+
+
+def test_absolute_config_paths_preserved(tmp_path):
+    cfg = tmp_path / "c.ini"
+    env = tmp_path / "e.env"
+    ctrl = BatchController(str(cfg), str(env))
+    assert ctrl.config_path == str(cfg)
+    assert ctrl.env_path == str(env)
 
 
 def _write(tmp_path):

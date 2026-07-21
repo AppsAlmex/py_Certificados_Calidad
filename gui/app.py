@@ -7,6 +7,7 @@ Dos pestanas:
 """
 from __future__ import annotations
 
+import os
 import queue
 import threading
 from datetime import datetime
@@ -626,10 +627,16 @@ class CertificadosApp(tk.Tk):
 
     # --------------------------------------------------------------- EVENTS
     def _pick_csv(self) -> None:
-        path = filedialog.askopenfilename(
-            title="Selecciona el CSV de solicitudes",
-            filetypes=[("CSV", "*.csv"), ("Todos", "*.*")],
-        )
+        # El dialogo nativo de Windows puede cambiar el cwd del proceso; lo
+        # restauramos para no afectar rutas relativas (output/logs).
+        cwd = os.getcwd()
+        try:
+            path = filedialog.askopenfilename(
+                title="Selecciona el CSV de solicitudes",
+                filetypes=[("CSV", "*.csv"), ("Todos", "*.*")],
+            )
+        finally:
+            os.chdir(cwd)
         if path:
             self._vars["csv"].set(path)
 
@@ -742,7 +749,7 @@ class SettingsWindow(tk.Toplevel):
         self.controller = controller
         self.saved = False
         self.title("Configuracion (Settings)")
-        self.geometry("700x600")
+        self.geometry("700x630")
         self.transient(parent)
         self.grab_set()  # modal: bloquea la ventana principal
         self.protocol("WM_DELETE_WINDOW", self.destroy)
