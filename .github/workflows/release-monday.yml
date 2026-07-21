@@ -3,8 +3,12 @@ name: Release lunes (dev -> main)
 # Suelta a main SOLO los lunes 07:00 (hora de Mexico, UTC-6 => 13:00 UTC).
 # 1. Busca el PR abierto dev -> main.
 # 2. Lo mergea (los checks deben estar verdes; asi lo exige la proteccion de main).
-# 3. Calcula el siguiente tag (patch por defecto; 'minor'/'major' si el PR tiene
-#    esa etiqueta) y lo crea -> el tag dispara build.yml (Release del .exe).
+# 3. Calcula el siguiente tag por Conventional Commits desde el ultimo tag:
+#      - algun 'feat!:' o 'BREAKING CHANGE'  -> major (2.0.0)
+#      - algun 'feat:'                       -> minor (1.3.0)
+#      - solo fix/chore/docs/...             -> patch (1.2.4)
+#    Una etiqueta 'major'/'minor'/'patch' en el PR fuerza el bump (override).
+#    Crea el tag -> el tag dispara build.yml (Release del .exe).
 #
 # Requiere el secret RELEASE_PAT (fine-grained PAT de este repo con
 # Contents: Read/Write y Pull requests: Read/Write). Se usa en vez del
@@ -42,14 +46,16 @@ jobs:
             echo "found=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # Override opcional por etiqueta del PR (vacio = decidir por commits).
           labels=$(gh pr view "$num" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' || true)
-          bump=patch
-          echo "$labels" | grep -qx minor && bump=minor || true
-          echo "$labels" | grep -qx major && bump=major || true
-          echo "num=$num"     >> "$GITHUB_OUTPUT"
-          echo "bump=$bump"   >> "$GITHUB_OUTPUT"
-          echo "found=true"   >> "$GITHUB_OUTPUT"
-          echo "PR #$num -> bump $bump"
+          label_bump=""
+          echo "$labels" | grep -qx patch && label_bump=patch || true
+          echo "$labels" | grep -qx minor && label_bump=minor || true
+          echo "$labels" | grep -qx major && label_bump=major || true
+          echo "num=$num"               >> "$GITHUB_OUTPUT"
+          echo "label_bump=$label_bump" >> "$GITHUB_OUTPUT"
+          echo "found=true"             >> "$GITHUB_OUTPUT"
+          echo "PR #$num -> label_bump='${label_bump:-<auto>}'"
 
       - name: Mergear PR a main
         if: steps.pr.outputs.found == 'true'
@@ -59,23 +65,49 @@ jobs:
           set -euo pipefail
           gh pr merge "${{ steps.pr.outputs.num }}" --repo "$GITHUB_REPOSITORY" --merge
 
-      - name: Crear el tag (auto-incremento)
+      - name: Crear el tag (semver por Conventional Commits)
         if: steps.pr.outputs.found == 'true'
+        env:
+          LABEL_BUMP: ${{ steps.pr.outputs.label_bump }}
         run: |
           set -euo pipefail
           git fetch origin main --tags
           git checkout main
           git pull origin main
+
           latest=$(git tag -l 'v*' | sort -V | tail -1)
           [ -z "$latest" ] && latest="v0.0.0"
+
+          # Rango de commits desde el ultimo tag (o todo si no hay tags).
+          if git rev-parse -q --verify "refs/tags/${latest}" >/dev/null; then
+            range="${latest}..HEAD"
+          else
+            range="HEAD"
+          fi
+          subjects=$(git log $range --no-merges --format='%s')
+          bodies=$(git log $range --format='%B')
+
+          # Decidir bump por Conventional Commits.
+          cc_bump=patch
+          if printf '%s\n' "$bodies" | grep -qE 'BREAKING CHANGE' \
+             || printf '%s\n' "$subjects" | grep -qE '^[a-zA-Z]+(\([^)]+\))?!:'; then
+            cc_bump=major
+          elif printf '%s\n' "$subjects" | grep -qiE '^feat(\([^)]+\))?:'; then
+            cc_bump=minor
+          fi
+
+          # La etiqueta del PR (si existe) gana; si no, manda Conventional Commits.
+          bump="${LABEL_BUMP:-}"
+          [ -z "$bump" ] && bump="$cc_bump"
+
           ver="${latest#v}"
           IFS='.' read -r MA MI PA <<< "$ver"
-          case "${{ steps.pr.outputs.bump }}" in
+          case "$bump" in
             major) MA=$((MA+1)); MI=0; PA=0 ;;
             minor) MI=$((MI+1)); PA=0 ;;
             *)     PA=$((PA+1)) ;;
           esac
           new="v${MA}.${MI}.${PA}"
-          echo "Ultimo tag: $latest -> nuevo: $new"
+          echo "Ultimo tag: $latest | bump: $bump | nuevo: $new"
           git tag "$new"
           git push origin "$new"
