@@ -21,6 +21,7 @@ from .exceptions import (
     LayoutError,
 )
 from .pdf_renderer import available_local_formats
+from .labels import LabelData, render_label_html, render_label_pdf
 from .csv_reader import CSVReader
 from .validators import (
     RequestValidator,
@@ -79,6 +80,9 @@ __all__ = [
     "LocalPdfReportGateway",
     "build_gateway",
     "available_local_formats",
+    "LabelData",
+    "render_label_html",
+    "render_label_pdf",
     "LayoutError",
     "ResultLogger",
     "BatchProcessor",
