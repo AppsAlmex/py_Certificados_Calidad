@@ -36,6 +36,20 @@ def _default_layouts_dir() -> Path:
 LAYOUTS_DIR = _default_layouts_dir()
 
 
+def asset_data_uri(assets_dir, name: str) -> str:
+    """Lee un asset (imagen) y lo devuelve como data URI base64 para embeberlo
+    en el HTML. '' si no existe. Compartido por certificados y etiquetas."""
+    file = Path(assets_dir) / name
+    if not file.exists():
+        return ""
+    suffix = file.suffix.lower()
+    mime = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".gif": "image/gif", ".svg": "image/svg+xml",
+    }.get(suffix, "application/octet-stream")
+    return f"data:{mime};base64,{b64encode(file.read_bytes()).decode()}"
+
+
 def available_local_formats(templates_dir=LAYOUTS_DIR) -> List[str]:
     """Formatos con plantilla local (archivos formato<X>.html). Ej: ['1']."""
     directory = Path(templates_dir)
@@ -70,15 +84,7 @@ class HtmlLayoutRenderer(LayoutRenderer):
         self._env.globals["asset"] = self._asset_uri
 
     def _asset_uri(self, name: str) -> str:
-        file = self.assets_dir / name
-        if not file.exists():
-            return ""
-        suffix = file.suffix.lower()
-        mime = {
-            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-            ".gif": "image/gif", ".svg": "image/svg+xml",
-        }.get(suffix, "application/octet-stream")
-        return f"data:{mime};base64,{b64encode(file.read_bytes()).decode()}"
+        return asset_data_uri(self.assets_dir, name)
 
     def template_name(self, formato: str) -> str:
         name = f"formato{formato}.html"
@@ -98,20 +104,27 @@ class HtmlLayoutRenderer(LayoutRenderer):
         return html_to_pdf(self.render_html(data), self.page_format)
 
 
-def html_to_pdf(html: str, page_format: str = "Letter") -> bytes:
-    """Convierte HTML en PDF con Chromium headless (Playwright, sincrono)."""
+def html_to_pdf(html: str, page_format: str = "Letter", *,
+                width: str | None = None, height: str | None = None,
+                margin: dict | None = None) -> bytes:
+    """Convierte HTML en PDF con Chromium headless (Playwright, sincrono).
+
+    Por defecto usa un tamaño de pagina nombrado (``page_format``, ej. Letter).
+    Si se dan ``width`` y ``height`` (ej. "3in"/"2in") usa ese tamaño exacto en
+    vez del formato -> util para etiquetas. ``margin`` sobreescribe los margenes
+    (por defecto 10mm; para etiquetas conviene 0)."""
     from playwright.sync_api import sync_playwright
+
+    if margin is None:
+        margin = {"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"}
+    size_kwargs = {"width": width, "height": height} if (width and height) else {"format": page_format}
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
         try:
             page = browser.new_page()
             page.set_content(html, wait_until="load")
-            pdf = page.pdf(
-                format=page_format,
-                print_background=True,
-                margin={"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"},
-            )
+            pdf = page.pdf(print_background=True, margin=margin, **size_kwargs)
         finally:
             browser.close()
     return pdf

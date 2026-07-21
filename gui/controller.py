@@ -10,8 +10,10 @@ from __future__ import annotations
 import configparser
 import logging
 import queue
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -132,6 +134,22 @@ class BatchController:
 
     def read_doc(self, path) -> str:
         return Path(path).read_text(encoding="utf-8", errors="replace")
+
+    # -- generacion de etiqueta PDF (3x2") ------------------------------------
+    def generate_label(self, campos: dict) -> Path:
+        """Genera el PDF de una etiqueta con los datos del formulario y lo guarda
+        en la carpeta de salida. Devuelve la ruta del PDF creado."""
+        from certificados.labels import LabelData, render_label_pdf
+
+        data = LabelData(**campos)
+        pdf = render_label_pdf(data)
+
+        out_dir = Path(self.read_raw()["output_dir"] or "output")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        lote = re.sub(r"[^A-Za-z0-9._-]", "_", data.lote.strip()) or "etiqueta"
+        path = out_dir / f"etiqueta_{lote}_{datetime.now():%Y%m%d_%H%M%S}.pdf"
+        path.write_bytes(pdf)
+        return path
 
     def read_catalogs(self) -> dict:
         """Carga los catalogos valor/descripcion definidos en [catalogs].
