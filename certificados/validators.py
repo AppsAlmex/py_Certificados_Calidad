@@ -141,7 +141,7 @@ def build_default_validator() -> RequestValidator:
             RequiredFieldRule("P_FORMATO"),
             RequiredFieldRule("P_INSPECTOR"),
             RequiredFieldRule("P_PLANTA_PROD"),
-            RequiredFieldRule("P_TANQUE"),
+            # P_TANQUE es opcional (no requerido) tanto en CSV como en el individual.
             ChoiceRule("FORMATO_SALIDA", ["pdf", "xml", "xlsx"]),
             NumericRule("P_CANTIDAD1", allow_empty=True),
             NumericRule("P_CANTIDAD2", allow_empty=True),

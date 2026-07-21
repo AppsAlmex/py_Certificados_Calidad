@@ -30,6 +30,15 @@ def test_required_field_missing():
     assert result.issues[0].row == 2
 
 
+def test_tanque_es_opcional():
+    # P_TANQUE ya no es requerido: vacio o ausente debe pasar.
+    assert build_default_validator().validate(make(P_TANQUE="")).valid
+    sin_tanque = build_default_validator().validate(
+        ReportRequest(2, {"P_EMBARQUE": "1", "P_FORMATO": "1", "P_INSPECTOR": "3",
+                          "P_PLANTA_PROD": "P"}, output_format="pdf"))
+    assert sin_tanque.valid
+
+
 def test_bad_output_format():
     result = build_default_validator().validate(make(_format="docx"))
     assert not result.valid
