@@ -77,8 +77,8 @@ class CertificadosApp(tk.Tk):
         self._single_tab = ttk.Frame(notebook)
         self._label_tab = ttk.Frame(notebook)
         self._logs_tab = ttk.Frame(notebook)
-        notebook.add(self._exec_tab, text="  Ejecucion (CSV)  ")
         notebook.add(self._single_tab, text="  Certificado individual  ")
+        notebook.add(self._exec_tab, text="  Ejecucion por Lote  ")
         notebook.add(self._label_tab, text="  Etiqueta  ")
         notebook.add(self._logs_tab, text="  Logs  ")
 
