@@ -67,9 +67,21 @@ class BatchController:
     """Fachada del nucleo para la GUI."""
 
     def __init__(self, config_path: str = "config.ini", env_path: str = ".env"):
-        self.config_path = config_path
-        self.env_path = env_path
+        # Rutas ABSOLUTAS ancladas a app_dir() (carpeta del .exe, o cwd en script).
+        # Clave para persistencia: los dialogos de archivo de Windows pueden cambiar
+        # el cwd del proceso; con rutas relativas, save_config escribiria config.ini
+        # en otra carpeta y al reabrir se leeria la de junto al exe -> "no se guardo".
+        self.config_path = str(self._anchor(config_path))
+        self.env_path = str(self._anchor(env_path))
         self._cancel_event: threading.Event | None = None
+
+    @staticmethod
+    def _anchor(path: str) -> Path:
+        """Convierte una ruta relativa en absoluta bajo app_dir(); deja las
+        absolutas tal cual."""
+        from certificados.runtime import app_dir
+        p = Path(path)
+        return p if p.is_absolute() else app_dir() / p
 
     # -- cancelacion ----------------------------------------------------------
     def cancel(self) -> None:
