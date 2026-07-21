@@ -1,0 +1,35 @@
+name: CI
+
+# Checks obligatorios para los Pull Request. Corre los tests y hace cumplir el
+# coverage minimo (80%, definido en pytest.ini: --cov-fail-under=80).
+# Este es el check que main exige antes de permitir un merge.
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Tests + coverage (falla si < 80%)
+        run: pytest

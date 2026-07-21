@@ -1,0 +1,81 @@
+name: Release lunes (dev -> main)
+
+# Suelta a main SOLO los lunes 07:00 (hora de Mexico, UTC-6 => 13:00 UTC).
+# 1. Busca el PR abierto dev -> main.
+# 2. Lo mergea (los checks deben estar verdes; asi lo exige la proteccion de main).
+# 3. Calcula el siguiente tag (patch por defecto; 'minor'/'major' si el PR tiene
+#    esa etiqueta) y lo crea -> el tag dispara build.yml (Release del .exe).
+#
+# Requiere el secret RELEASE_PAT (fine-grained PAT de este repo con
+# Contents: Read/Write y Pull requests: Read/Write). Se usa en vez del
+# GITHUB_TOKEN porque los push hechos con GITHUB_TOKEN NO disparan otros
+# workflows (el tag no lanzaria el build).
+on:
+  schedule:
+    - cron: "0 13 * * 1"   # Lunes 13:00 UTC = 07:00 America/Mexico_City (UTC-6)
+  workflow_dispatch:        # permite dispararlo a mano para probar
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (historial + tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Buscar PR dev -> main y decidir el bump
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          num=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --head dev \
+                --state open --json number --jq '.[0].number // empty')
+          if [ -z "$num" ]; then
+            echo "No hay PR abierto dev -> main. Nada que soltar."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          labels=$(gh pr view "$num" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' || true)
+          bump=patch
+          echo "$labels" | grep -qx minor && bump=minor || true
+          echo "$labels" | grep -qx major && bump=major || true
+          echo "num=$num"     >> "$GITHUB_OUTPUT"
+          echo "bump=$bump"   >> "$GITHUB_OUTPUT"
+          echo "found=true"   >> "$GITHUB_OUTPUT"
+          echo "PR #$num -> bump $bump"
+
+      - name: Mergear PR a main
+        if: steps.pr.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          gh pr merge "${{ steps.pr.outputs.num }}" --repo "$GITHUB_REPOSITORY" --merge
+
+      - name: Crear el tag (auto-incremento)
+        if: steps.pr.outputs.found == 'true'
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags
+          git checkout main
+          git pull origin main
+          latest=$(git tag -l 'v*' | sort -V | tail -1)
+          [ -z "$latest" ] && latest="v0.0.0"
+          ver="${latest#v}"
+          IFS='.' read -r MA MI PA <<< "$ver"
+          case "${{ steps.pr.outputs.bump }}" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            *)     PA=$((PA+1)) ;;
+          esac
+          new="v${MA}.${MI}.${PA}"
+          echo "Ultimo tag: $latest -> nuevo: $new"
+          git tag "$new"
+          git push origin "$new"
