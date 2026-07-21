@@ -1,8 +1,11 @@
 name: Release lunes (dev -> main)
 
 # Suelta a main SOLO los lunes 07:00 (hora de Mexico, UTC-6 => 13:00 UTC).
-# 1. Busca el PR abierto dev -> main.
-# 2. Lo mergea (los checks deben estar verdes; asi lo exige la proteccion de main).
+# 1. Si hay PR abierto dev -> main, lo mergea (los checks deben estar verdes;
+#    asi lo exige la proteccion de main).
+# 2. BLINDAJE: haya o no PR (aunque lo hayas mergeado a mano), si main tiene
+#    commits nuevos sobre el ultimo tag, calcula y crea el tag igual. Si main no
+#    trae nada nuevo, no hace nada.
 # 3. Calcula el siguiente tag por Conventional Commits desde el ultimo tag:
 #      - algun 'feat!:' o 'BREAKING CHANGE'  -> major (2.0.0)
 #      - algun 'feat:'                       -> minor (1.3.0)
@@ -41,21 +44,23 @@ jobs:
           set -euo pipefail
           num=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --head dev \
                 --state open --json number --jq '.[0].number // empty')
-          if [ -z "$num" ]; then
-            echo "No hay PR abierto dev -> main. Nada que soltar."
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Override opcional por etiqueta del PR (vacio = decidir por commits).
-          labels=$(gh pr view "$num" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' || true)
           label_bump=""
-          echo "$labels" | grep -qx patch && label_bump=patch || true
-          echo "$labels" | grep -qx minor && label_bump=minor || true
-          echo "$labels" | grep -qx major && label_bump=major || true
-          echo "num=$num"               >> "$GITHUB_OUTPUT"
+          if [ -n "$num" ]; then
+            # Hay PR abierto: se mergeara y su etiqueta (si tiene) fuerza el bump.
+            labels=$(gh pr view "$num" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' || true)
+            echo "$labels" | grep -qx patch && label_bump=patch || true
+            echo "$labels" | grep -qx minor && label_bump=minor || true
+            echo "$labels" | grep -qx major && label_bump=major || true
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "num=$num"   >> "$GITHUB_OUTPUT"
+            echo "PR #$num abierto -> label_bump='${label_bump:-<auto>}'"
+          else
+            # Blindaje: sin PR abierto (p.ej. lo mergeaste a mano) NO abortamos;
+            # el tag se calcula directo sobre main si tiene commits nuevos.
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No hay PR abierto dev -> main. Se intentara tag directo sobre main."
+          fi
           echo "label_bump=$label_bump" >> "$GITHUB_OUTPUT"
-          echo "found=true"             >> "$GITHUB_OUTPUT"
-          echo "PR #$num -> label_bump='${label_bump:-<auto>}'"
 
       - name: Mergear PR a main
         if: steps.pr.outputs.found == 'true'
@@ -66,7 +71,8 @@ jobs:
           gh pr merge "${{ steps.pr.outputs.num }}" --repo "$GITHUB_REPOSITORY" --merge
 
       - name: Crear el tag (semver por Conventional Commits)
-        if: steps.pr.outputs.found == 'true'
+        # Sin gate por 'found': taggea aunque el PR ya se haya mergeado a mano,
+        # mientras main tenga commits nuevos sobre el ultimo tag (idempotente).
         env:
           LABEL_BUMP: ${{ steps.pr.outputs.label_bump }}
         run: |
@@ -84,6 +90,13 @@ jobs:
           else
             range="HEAD"
           fi
+
+          # Si main no tiene nada nuevo sobre el ultimo tag, no hay release.
+          if [ "$(git rev-list --count $range)" -eq 0 ]; then
+            echo "main sin commits nuevos sobre ${latest}. Nada que taggear."
+            exit 0
+          fi
+
           subjects=$(git log $range --no-merges --format='%s')
           bodies=$(git log $range --format='%B')
 
