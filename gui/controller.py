@@ -178,6 +178,68 @@ class BatchController:
             result[field] = load_catalog(Path(base) / filename)
         return result
 
+    # -- catalogo de inspectores (sincronizacion desde Oracle) ----------------
+    def _catalog_path(self, field: str) -> Path:
+        """Ruta ABSOLUTA (anclada a app_dir) del CSV de un catalogo de [catalogs]."""
+        parser = configparser.ConfigParser()
+        parser.optionxform = str
+        parser.read(self.config_path, encoding="utf-8")
+        has = parser.has_section("catalogs")
+        base = parser.get("catalogs", "dir", fallback="catalogos") if has else "catalogos"
+        filename = parser.get("catalogs", field, fallback=f"{field}.csv") if has else f"{field}.csv"
+        return self._anchor(str(Path(base) / filename))
+
+    def inspector_csv_path(self) -> Path:
+        return self._catalog_path("inspector")
+
+    def catalog_reports(self) -> dict:
+        """Reportes que ALIMENTAN catalogos: {campo: ruta .xdo} desde [catalog_reports].
+
+        Estan separados de los reportes de certificados ([reports]). Un campo sin
+        entrada aqui significa que ese catalogo aun no tiene reporte (boton de
+        actualizacion deshabilitado en la GUI).
+        """
+        parser = configparser.ConfigParser()
+        parser.optionxform = str
+        parser.read(self.config_path, encoding="utf-8")
+        if not parser.has_section("catalog_reports"):
+            return {}
+        return {k: v.strip() for k, v in parser.items("catalog_reports") if v.strip()}
+
+    def sync_inspectores(self, apply: bool = False):
+        """Consulta el reporte de inspectores y fusiona con el csv local.
+
+        La ruta del reporte se lee de [catalog_reports] inspector (separado de los
+        reportes de certificados). Con ``apply=False`` solo calcula el resumen
+        (para confirmar en la GUI); con ``apply=True`` ademas escribe el csv.
+        """
+        from dataclasses import replace
+
+        from certificados.inspectores import INSPECTOR_REPORT_KEY, sync_inspectores
+
+        ruta = self.catalog_reports().get("inspector")
+        if not ruta:
+            raise RuntimeError(
+                "No hay reporte configurado para 'inspector'. Agrega la ruta en "
+                "[catalog_reports] de config.ini."
+            )
+        # Settings base (usa el reporte de certificados por defecto) y se le
+        # sobreescribe la ruta al reporte del catalogo. Asi no mezclamos catalogos
+        # en [reports].
+        settings = load_settings(self.config_path, self.env_path)
+        settings = replace(settings, report_path=ruta, report_key=INSPECTOR_REPORT_KEY)
+        return sync_inspectores(settings, self.inspector_csv_path(), apply=apply)
+
+    def apply_inspectores(self, result) -> None:
+        """Escribe en disco las filas ya calculadas de un ``SyncResult`` (sin re-consultar)."""
+        from certificados.inspectores import write_csv
+        write_csv(self.inspector_csv_path(), result.filas)
+
+    def create_default_catalog_csv(self, field: str, overwrite: bool = False) -> bool:
+        """Crea el CSV por defecto de un catalogo (solo encabezado). True si lo creo."""
+        from certificados.inspectores import create_default_csv
+        return create_default_csv(self._catalog_path(field), overwrite=overwrite)
+
     # -- lectura de logs ------------------------------------------------------
     def read_runs(self):
         """Lista de ejecuciones previas (mas recientes primero)."""
