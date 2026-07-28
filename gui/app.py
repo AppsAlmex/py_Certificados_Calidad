@@ -820,7 +820,7 @@ class SettingsWindow(tk.Toplevel):
         ttk.Combobox(form, textvariable=self._vars["pdf_engine"], values=["oracle", "local"],
                      state="readonly", width=12).grid(row=n + 4, column=1, sticky="w", padx=6)
 
-        cat = ttk.LabelFrame(parent, text="Catalogo de reportes (una linea:  clave = /ruta/reporte.xdo)")
+        cat = ttk.LabelFrame(parent, text="Reportes de Certificados (una linea:  clave = /ruta/reporte.xdo)")
         cat.pack(fill="both", expand=True, padx=8, pady=8)
         self._reports_text = tk.Text(cat, height=7, wrap="none")
         self._reports_text.pack(fill="both", expand=True, padx=6, pady=6)
@@ -831,21 +831,50 @@ class SettingsWindow(tk.Toplevel):
         ttk.Button(btns, text="Cerrar", command=self.destroy).pack(side="right", padx=6)
 
     # ---- pestana Catalogos ----
+    # Campos de catalogo y su etiqueta legible en esta pestana.
+    _CATALOG_TAB_FIELDS = (
+        ("formato", "Formato"),
+        ("inspector", "Inspector"),
+        ("planta_prod", "Planta produccion"),
+    )
+
     def _build_catalog_tab(self, parent) -> None:
-        top = ttk.Frame(parent)
-        top.pack(fill="x", padx=8, pady=8)
-        ttk.Button(top, text="Recargar y validar catalogos", command=self._reload_catalogs).pack(side="left")
-        ttk.Label(top, text="(los CSV de la carpeta 'catalogos')", foreground="#666").pack(side="left", padx=8)
+        ttk.Label(parent, text="Estado de los catalogos (se valida al abrir Settings).",
+                  foreground="#666").pack(anchor="w", padx=8, pady=(8, 0))
 
         cols = ("catalogo", "opciones", "estado", "detalle")
-        self._cat_tree = ttk.Treeview(parent, columns=cols, show="headings")
+        self._cat_tree = ttk.Treeview(parent, columns=cols, show="headings", height=5)
         for col, text, width in (("catalogo", "Catalogo", 120), ("opciones", "Opciones", 80),
                                  ("estado", "Estado", 80), ("detalle", "Detalle", 360)):
             self._cat_tree.heading(col, text=text)
             self._cat_tree.column(col, width=width, anchor="w")
         self._cat_tree.tag_configure("ok", foreground="#1a7f37")
         self._cat_tree.tag_configure("fail", foreground="#b42318")
-        self._cat_tree.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self._cat_tree.pack(fill="both", expand=True, padx=8, pady=8)
+
+        actions = ttk.LabelFrame(parent, text="Acciones por catalogo (actualizar desde Oracle / recrear archivo)")
+        actions.pack(fill="x", padx=8, pady=(0, 8))
+        reportes = self.controller.catalog_reports()  # que catalogos tienen reporte
+        for i, (field, label) in enumerate(self._CATALOG_TAB_FIELDS):
+            ttk.Label(actions, text=f"{label}:").grid(row=i, column=0, sticky="w", padx=6, pady=3)
+            tiene_reporte = field in reportes
+            ttk.Button(
+                actions, text="Actualizar desde Oracle",
+                state="normal" if tiene_reporte else "disabled",
+                command=lambda f=field, lbl=label: self._sync_catalog(f, lbl),
+            ).grid(row=i, column=1, padx=4, pady=3)
+            ttk.Button(
+                actions, text="Crear archivo por defecto",
+                command=lambda f=field, lbl=label: self._create_default_catalog(f, lbl),
+            ).grid(row=i, column=2, padx=4, pady=3)
+            if not tiene_reporte:
+                ttk.Label(actions, text="(sin reporte configurado)",
+                          foreground="#999").grid(row=i, column=3, sticky="w", padx=6)
+
+        self._cat_action_status = tk.StringVar(value="")
+        ttk.Label(actions, textvariable=self._cat_action_status,
+                  foreground="#666").grid(row=len(self._CATALOG_TAB_FIELDS), column=0,
+                                          columnspan=4, sticky="w", padx=6, pady=(4, 6))
 
     def _reload_catalogs(self) -> None:
         self._cat_tree.delete(*self._cat_tree.get_children())
@@ -862,6 +891,106 @@ class SettingsWindow(tk.Toplevel):
             self._cat_tree.insert("", "end",
                                   values=(campo, n, estado, "; ".join(issues) if issues else "OK"),
                                   tags=("ok" if not issues else "fail",))
+
+    def _sync_catalog(self, field: str, label: str) -> None:
+        """Consulta el reporte del catalogo, muestra el resumen y, si el usuario
+        confirma, escribe el csv. El reporte manda en conflictos y NUNCA se borran
+        entradas locales ausentes del reporte.
+
+        Por ahora solo 'inspector' tiene reporte; los demas botones estan
+        deshabilitados hasta que exista el suyo."""
+        if field != "inspector":
+            messagebox.showinfo(
+                f"Actualizar {label}",
+                "Este catalogo aun no tiene reporte configurado.", parent=self)
+            return
+
+        titulo = f"Actualizar {label}"
+        self._cat_action_status.set("Consultando Oracle...")
+        self.config(cursor="watch")
+        self.update_idletasks()
+        try:
+            result = self.controller.sync_inspectores(apply=False)  # solo calcula
+        except Exception as exc:
+            self._cat_action_status.set("Error al consultar.")
+            messagebox.showerror(titulo, str(exc), parent=self)
+            return
+        finally:
+            self.config(cursor="")
+
+        if result.sin_cambios:
+            self._cat_action_status.set(
+                f"{label}: sin cambios. {result.total} registros (reporte: {result.remoto_total})."
+            )
+            messagebox.showinfo(titulo,
+                                "El catalogo ya esta al dia. No hay cambios que aplicar.",
+                                parent=self)
+            return
+
+        detalle = self._format_sync_detail(result)
+        if not messagebox.askyesno(titulo,
+                                   detalle + "\n\n¿Aplicar los cambios al archivo?",
+                                   parent=self):
+            self._cat_action_status.set("Cancelado. No se escribio nada.")
+            return
+        try:
+            self.controller.apply_inspectores(result)
+        except Exception as exc:
+            messagebox.showerror(titulo, f"No se pudo escribir:\n{exc}", parent=self)
+            return
+        self._cat_action_status.set(
+            f"{label} actualizado: {len(result.nuevos)} nuevos, {len(result.cambiados)} "
+            f"cambiados, {len(result.conservados)} conservados. Total {result.total}."
+        )
+        self._reload_catalogs()  # refresca la tabla de arriba
+
+    @staticmethod
+    def _format_sync_detail(result) -> str:
+        """Arma el texto del resumen para el dialogo de confirmacion (acotado)."""
+        def bloque(titulo, items, fmt, limite=15):
+            if not items:
+                return f"{titulo}: 0"
+            muestra = "\n".join("   " + fmt(i) for i in items[:limite])
+            extra = f"\n   ... (+{len(items) - limite} mas)" if len(items) > limite else ""
+            return f"{titulo}: {len(items)}\n{muestra}{extra}"
+
+        partes = [
+            f"Reporte: {result.remoto_total} inspectores. Total tras aplicar: {result.total}.",
+            "",
+            bloque("NUEVOS", result.nuevos, lambda r: f"+ {r[0]}  {r[1]}"),
+            bloque("CAMBIADOS", result.cambiados, lambda r: f"~ {r[0]}  '{r[1]}' -> '{r[2]}'"),
+        ]
+        if result.conservados:
+            partes.append(
+                bloque("CONSERVADOS (solo local, no se borran)",
+                       result.conservados, lambda r: f"= {r[0]}  {r[1]}")
+            )
+        return "\n".join(partes)
+
+    def _create_default_catalog(self, field: str, label: str) -> None:
+        """Crea el CSV por defecto del catalogo (solo encabezado) si no existe; si
+        existe, pide confirmacion antes de reemplazarlo por uno vacio."""
+        titulo = f"Crear archivo por defecto ({label})"
+        try:
+            creado = self.controller.create_default_catalog_csv(field, overwrite=False)
+            if not creado:
+                if not messagebox.askyesno(
+                    titulo,
+                    f"El archivo del catalogo '{label}' ya existe.\n\n"
+                    "¿Reemplazarlo por uno VACIO (solo encabezado)? "
+                    "Se perderan los datos actuales.",
+                    parent=self,
+                    icon="warning",
+                ):
+                    self._cat_action_status.set("Cancelado.")
+                    return
+                self.controller.create_default_catalog_csv(field, overwrite=True)
+            self._cat_action_status.set(
+                f"{label}: archivo por defecto creado (encabezado 'valor,descripcion').")
+        except Exception as exc:
+            messagebox.showerror(titulo, str(exc), parent=self)
+            return
+        self._reload_catalogs()
 
     # ---- pestana Health check ----
     def _build_health_tab(self, parent) -> None:
