@@ -35,6 +35,16 @@ class LogRun:
         stamp = self.results_path.stem[len(RESULT_PREFIX):]
         return self.results_path.parent / f"{LOG_PREFIX}{stamp}.log"
 
+    @property
+    def diagnostics_path(self) -> Path:
+        stamp = self.results_path.stem[len(RESULT_PREFIX):]
+        return self.results_path.parent / f"diagnostico_{stamp}.jsonl"
+
+    @property
+    def context_path(self) -> Path:
+        stamp = self.results_path.stem[len(RESULT_PREFIX):]
+        return self.results_path.parent / f"contexto_{stamp}.txt"
+
 
 def _format_stamp(results_path: Path) -> str:
     stamp = results_path.stem[len(RESULT_PREFIX):]

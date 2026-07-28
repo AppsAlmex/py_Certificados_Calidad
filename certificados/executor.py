@@ -19,8 +19,10 @@ import requests
 from lxml import etree
 
 from .config import Settings
+from .diagnostics import NullTransportCapture, TransportCapture, redact_soap
 from .exceptions import (
     AuthenticationError,
+    CertificadoError,
     FileSaveError,
     ReportConnectionError,
     ReportGenerationError,
@@ -39,12 +41,13 @@ class ReportGateway(ABC):
 class OracleReportClient(ReportGateway):
     """SOAP client for Oracle BI Publisher ReportService v2."""
 
-    def __init__(self, settings: Settings, session: requests.Session | None = None):
+    def __init__(self, settings: Settings, session: requests.Session | None = None,
+                 transport: TransportCapture | None = None):
         self._settings = settings
         # Session injected for testability (Dependency Inversion).
         self._session = session or requests.Session()
-        # Con verify_ssl=false requests emite InsecureRequestWarning en cada
-        # llamada; si el usuario apago la verificacion a proposito, evitamos el ruido.
+        # Capturador de diagnóstico (SOAP/respuesta por fila). Null = sin captura.
+        self._transport = transport or NullTransportCapture()
         if not settings.verify_ssl:
             import urllib3
 
@@ -56,13 +59,35 @@ class OracleReportClient(ReportGateway):
         return self._save(request, content)
 
     def fetch_bytes(self, request: ReportRequest) -> bytes:
-        """Descarga y decodifica el reporte de Oracle SIN guardarlo.
-
-        Util para reusar la data (p.ej. pedir XML y renderizar el PDF localmente).
-        """
+        """Descarga y decodifica el reporte SIN guardarlo, registrando el
+        transporte (SOAP redactado + resultado) por fila para diagnóstico."""
+        fila = request.row_number
         soap = self._build_soap(request)
-        response = self._send(soap)
-        return self._extract_report(response)
+        redacted = redact_soap(soap)
+        try:
+            response = self._send(soap)
+        except CertificadoError as exc:
+            # HTTP != 200 / red: el cuerpo/motivo viaja en el mensaje de la excepción.
+            self._safe_record(fila, redacted, status=None, body=str(exc),
+                               is_report=False, size=None)
+            raise
+        try:
+            content = self._extract_report(response)
+        except CertificadoError as exc:
+            self._safe_record(fila, redacted, status=response.status_code, body=str(exc),
+                              is_report=False, size=None)
+            raise
+        self._safe_record(fila, redacted, status=response.status_code, body=None,
+                          is_report=True, size=len(content))
+        return content
+
+    def _safe_record(self, fila, soap, status, body, is_report, size) -> None:
+        """Registra transporte sin romper la ejecución si el capturador falla."""
+        try:
+            self._transport.record(fila, soap=soap, status=status, response_body=body,
+                                    is_report=is_report, size=size)
+        except Exception:  # best-effort: el diagnóstico nunca tumba el reporte
+            pass
 
     # -- steps --------------------------------------------------------------
     def _build_soap(self, request: ReportRequest) -> str:
@@ -178,9 +203,10 @@ class LocalPdfReportGateway(ReportGateway):
     ``OracleReportClient`` (Open/Closed): lo compone.
     """
 
-    def __init__(self, settings: Settings, oracle_client: "OracleReportClient | None" = None, renderer=None):
+    def __init__(self, settings: Settings, oracle_client: "OracleReportClient | None" = None,
+                 renderer=None, transport: TransportCapture | None = None):
         self._settings = settings
-        self._oracle = oracle_client or OracleReportClient(settings)
+        self._oracle = oracle_client or OracleReportClient(settings, transport=transport)
         self._renderer = renderer  # se crea perezosamente (evita importar playwright si no se usa)
 
     def _get_renderer(self):
@@ -205,8 +231,8 @@ class LocalPdfReportGateway(ReportGateway):
         return save_report(self._settings.output_dir, request, pdf_bytes)
 
 
-def build_gateway(settings: Settings) -> ReportGateway:
+def build_gateway(settings: Settings, transport: TransportCapture | None = None) -> ReportGateway:
     """Elige el gateway segun el motor de PDF configurado (oracle | local)."""
     if getattr(settings, "pdf_engine", "oracle").lower() == "local":
-        return LocalPdfReportGateway(settings)
-    return OracleReportClient(settings)
+        return LocalPdfReportGateway(settings, transport=transport)
+    return OracleReportClient(settings, transport=transport)
