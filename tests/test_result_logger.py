@@ -1,8 +1,65 @@
+import json
 from pathlib import Path
 
+from certificados.diagnostics import InMemoryTransportCapture
 from certificados.models import BatchSummary, ReportRequest, ReportResult
 from certificados.result_logger import ResultLogger
 from certificados.validators import ValidationIssue
+
+
+def _req(fila=2):
+    return ReportRequest(row_number=fila, params={"P_INSPECTOR": "003"}, output_format="pdf")
+
+
+def test_jsonl_ok_lleva_transporte_y_params_legibles(tmp_path):
+    cap = InMemoryTransportCapture()
+    cap.record(2, soap="<v2:password>***</v2:password>", status=200, is_report=True, size=123)
+    expander = lambda params: {"P_INSPECTOR": "003 - Hector Correa"}
+    with ResultLogger(tmp_path, transport=cap, param_expander=expander,
+                      context={"reporte": "R"}) as logger:
+        req = _req()
+        result = ReportResult(request=req, file_path=tmp_path / "c.pdf", size_bytes=123)
+        logger.log_success(result, 1.5)
+        jsonl_path = logger.diagnostics_path
+    lines = jsonl_path.read_text(encoding="utf-8").splitlines()
+    entry = json.loads(lines[0])
+    assert entry["estado"] == "OK"
+    assert entry["http_status"] == 200
+    assert entry["respuesta"] is None
+    assert entry["respuesta_size"] == 123
+    assert entry["params_legibles"]["P_INSPECTOR"] == "003 - Hector Correa"
+    assert entry["soap_request"] == "<v2:password>***</v2:password>"
+
+
+def test_jsonl_error_lleva_cuerpo(tmp_path):
+    cap = InMemoryTransportCapture()
+    cap.record(2, soap="s", status=None, response_body="Respuesta HTTP 500: boom",
+               is_report=False, size=None)
+    with ResultLogger(tmp_path, transport=cap) as logger:
+        logger.log_failure(_req(), RuntimeError("boom"), 0.4)
+        jsonl_path = logger.diagnostics_path
+    entry = json.loads(jsonl_path.read_text(encoding="utf-8").splitlines()[0])
+    assert entry["estado"] == "ERROR"
+    assert "500" in entry["respuesta"]
+    assert entry["respuesta_size"] is None
+
+
+def test_jsonl_invalido_sin_transporte(tmp_path):
+    with ResultLogger(tmp_path) as logger:  # sin capturador
+        logger.log_invalid(_req(), ["campo X requerido"], 0.0)
+        jsonl_path = logger.diagnostics_path
+    entry = json.loads(jsonl_path.read_text(encoding="utf-8").splitlines()[0])
+    assert entry["estado"] == "INVALIDO"
+    assert entry["soap_request"] is None
+    assert "campo X requerido" in entry["mensaje"]
+
+
+def test_contexto_txt_se_escribe(tmp_path):
+    with ResultLogger(tmp_path, context={"reporte": "R", "workers": 4}) as logger:
+        ctx_path = logger.context_path
+    text = ctx_path.read_text(encoding="utf-8")
+    assert "reporte: R" in text
+    assert "workers: 4" in text
 
 
 def make_req(row=2):
@@ -55,6 +112,20 @@ def test_context_recorded_in_results_and_log(tmp_path):
     log_text = list(tmp_path.glob("ejecucion_*.log"))[0].read_text(encoding="utf-8")
     assert "Inicio de ejecucion" in log_text
     assert "reporte=REP_X" in log_text
+
+
+def test_jsonl_ok_nunca_guarda_cuerpo_aunque_se_registre(tmp_path):
+    cap = InMemoryTransportCapture()
+    cap.record(2, soap="s", status=200, response_body="NO DEBERIA APARECER",
+               is_report=True, size=50)
+    with ResultLogger(tmp_path, transport=cap) as logger:
+        req = _req()
+        result = ReportResult(request=req, file_path=tmp_path / "c.pdf", size_bytes=50)
+        logger.log_success(result, 1.0)
+        jsonl_path = logger.diagnostics_path
+    entry = json.loads(jsonl_path.read_text(encoding="utf-8").splitlines()[0])
+    assert entry["respuesta"] is None
+    assert entry["respuesta_size"] == 50
 
 
 def test_extra_handler_receives_records_and_is_not_closed(tmp_path):

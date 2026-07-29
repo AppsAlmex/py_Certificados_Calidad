@@ -22,11 +22,14 @@ from certificados import (
     BatchProcessor,
     ConcurrentBatchProcessor,
     CSVReader,
+    InMemoryTransportCapture,
     ResultLogger,
     available_local_formats,
     build_default_validator,
     build_gateway,
+    build_share_zip,
     execute_and_log,
+    expand_params,
     load_catalog,
     load_settings,
     save_config,
@@ -55,10 +58,18 @@ def _as_bool(value: str) -> bool:
 
 def _run_context(settings, origen: str) -> dict:
     """Contexto de la corrida que se guarda en los logs (para saber que se uso)."""
+    import platform
+
+    from certificados import __version__
     return {
         "reporte": settings.report_key,
+        "ruta_reporte": settings.report_path,
+        "host": settings.host,
+        "motor_pdf": getattr(settings, "pdf_engine", "oracle"),
         "workers": settings.max_workers,
         "timeout": settings.timeout,
+        "version_app": __version__,
+        "sistema": platform.platform(),
         "origen": origen,
     }
 
@@ -240,6 +251,19 @@ class BatchController:
         from certificados.inspectores import create_default_csv
         return create_default_csv(self._catalog_path(field), overwrite=overwrite)
 
+    # -- diagnostico de logs (params legibles + compartir) --------------------
+    def _catalog_maps(self) -> dict:
+        """{campo: {valor: descripcion}} para expandir params en el diagnostico."""
+        cats = self.read_catalogs()
+        return {
+            field: {e.valor: e.descripcion for e in entries}
+            for field, entries in cats.items()
+        }
+
+    def build_share_zip(self, run, dest):
+        """Empaqueta el run seleccionado en un ZIP para compartir."""
+        return build_share_zip(run, dest, self.config_path)
+
     # -- lectura de logs ------------------------------------------------------
     def read_runs(self):
         """Lista de ejecuciones previas (mas recientes primero)."""
@@ -280,10 +304,14 @@ class BatchController:
                 )
                 reader = CSVReader(csv_path)
                 validator = build_default_validator()
-                gateway = build_gateway(settings)
+                capture = InMemoryTransportCapture()
+                maps = self._catalog_maps()
+                expander = lambda params: expand_params(params, maps)
+                gateway = build_gateway(settings, transport=capture)
                 context = _run_context(settings, origen=f"CSV:{csv_path}")
                 with ResultLogger(settings.log_dir, settings.log_level,
-                                  extra_handlers=[handler], context=context) as logger:
+                                  extra_handlers=[handler], context=context,
+                                  transport=capture, param_expander=expander) as logger:
                     if settings.max_workers > 1:
                         processor = ConcurrentBatchProcessor(
                             reader, validator, gateway, logger, max_workers=settings.max_workers
@@ -321,11 +349,15 @@ class BatchController:
                     workers=workers, pdf_engine=engine,
                 )
                 validator = build_default_validator()
-                gateway = build_gateway(settings)
+                capture = InMemoryTransportCapture()
+                maps = self._catalog_maps()
+                expander = lambda params: expand_params(params, maps)
+                gateway = build_gateway(settings, transport=capture)
                 summary = BatchSummary(total=len(items))
                 context = _run_context(settings, origen="Formulario individual")
                 with ResultLogger(settings.log_dir, settings.log_level,
-                                  extra_handlers=[handler], context=context) as logger:
+                                  extra_handlers=[handler], context=context,
+                                  transport=capture, param_expander=expander) as logger:
                     total = len(items)
                     progress = {"done": 0}
 

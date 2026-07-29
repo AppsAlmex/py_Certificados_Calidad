@@ -8,6 +8,7 @@ from .config import MAX_WORKERS, MIN_WORKERS, Settings, load_settings, save_conf
 from .catalogs import CatalogEntry, load_catalog, parse_valor, validate_catalog
 from .health import HealthResult, run_health_checks
 from .logs import LogRun, list_runs, read_log_text, read_results
+from .log_share import build_share_zip
 from .models import ReportRequest, ReportResult, BatchSummary
 from .exceptions import (
     CertificadoError,
@@ -35,6 +36,14 @@ from .validators import (
     build_default_validator,
 )
 from .executor import ReportGateway, OracleReportClient, LocalPdfReportGateway, build_gateway
+from .diagnostics import (
+    InMemoryTransportCapture,
+    NullTransportCapture,
+    TransportCapture,
+    TransportRecord,
+    expand_params,
+    redact_soap,
+)
 from .result_logger import ResultLogger
 from .batch import BatchProcessor, ConcurrentBatchProcessor, execute_and_log
 
@@ -54,6 +63,7 @@ __all__ = [
     "list_runs",
     "read_log_text",
     "read_results",
+    "build_share_zip",
     "ReportRequest",
     "ReportResult",
     "BatchSummary",
@@ -85,6 +95,12 @@ __all__ = [
     "render_label_pdf",
     "LayoutError",
     "ResultLogger",
+    "TransportCapture",
+    "TransportRecord",
+    "NullTransportCapture",
+    "InMemoryTransportCapture",
+    "expand_params",
+    "redact_soap",
     "BatchProcessor",
     "ConcurrentBatchProcessor",
     "execute_and_log",

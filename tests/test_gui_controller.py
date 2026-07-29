@@ -122,7 +122,7 @@ def test_process_requests_async(tmp_path, monkeypatch, settings):
         def run_report(self, request):
             return ReportResult(request, Path("x.pdf"), 5)
 
-    monkeypatch.setattr(ctrl_mod, "build_gateway", lambda settings: FakeClient(settings))
+    monkeypatch.setattr(ctrl_mod, "build_gateway", lambda settings, transport=None: FakeClient(settings))
 
     valid = ReportRequest(
         1,
@@ -170,7 +170,7 @@ def test_process_requests_concurrent(tmp_path, monkeypatch, settings):
                 state["active"] -= 1
             return ReportResult(request, Path("x.pdf"), 5)
 
-    monkeypatch.setattr(ctrl_mod, "build_gateway", lambda settings: FakeClient(settings))
+    monkeypatch.setattr(ctrl_mod, "build_gateway", lambda settings, transport=None: FakeClient(settings))
 
     def make(n):
         return ReportRequest(
@@ -229,3 +229,18 @@ def test_save_config_preserves_catalogs_section(tmp_path):
     assert parser.has_section("catalogs")
     assert parser.get("catalogs", "formato") == "formato.csv"
     assert parser.get("service", "host") == "h2"  # sí actualizo lo editado
+
+
+def test_build_share_zip_delegates(monkeypatch, tmp_path):
+    called = {}
+
+    def fake_build(run, dest, config_path):
+        called["args"] = (run, dest, config_path)
+        return tmp_path / "z.zip"
+
+    monkeypatch.setattr(ctrl_mod, "build_share_zip", fake_build)
+    ctrl = BatchController(str(tmp_path / "config.ini"), str(tmp_path / ".env"))
+    out = ctrl.build_share_zip("RUN", tmp_path / "z.zip")
+    assert out == tmp_path / "z.zip"
+    assert called["args"][0] == "RUN"
+    assert called["args"][2] == ctrl.config_path
