@@ -411,9 +411,10 @@ class CertificadosApp(tk.Tk):
         runs_scroll.pack(side="right", fill="y")
         self._runs_tree.bind("<<TreeviewSelect>>", self._on_run_selected)
 
-        ttk.Button(parent, text="Refrescar", command=self._load_runs).pack(
-            anchor="w", padx=8, pady=(0, 4)
-        )
+        botones = ttk.Frame(parent)
+        botones.pack(fill="x", padx=8, pady=(0, 4))
+        ttk.Button(botones, text="Refrescar", command=self._load_runs).pack(side="left")
+        ttk.Button(botones, text="Compartir (ZIP)", command=self._share_run).pack(side="left", padx=6)
 
         detail = ttk.LabelFrame(parent, text="Detalle de la ejecucion")
         detail.pack(fill="both", expand=True, padx=8, pady=(4, 8))
@@ -423,16 +424,16 @@ class CertificadosApp(tk.Tk):
         # Sub-pestana: resultados por fila (estructurado)
         res_frame = ttk.Frame(detail_nb)
         detail_nb.add(res_frame, text="Resultados")
-        det_cols = ("fila", "reporte", "estado", "formato", "duracion_seg", "archivo", "mensaje")
+        det_cols = ("fila", "estado", "formato", "duracion_seg", "parametros", "archivo", "mensaje")
         self._detail_tree = ttk.Treeview(res_frame, columns=det_cols, show="headings", height=8)
         for col, text, width in (
             ("fila", "Fila", 50),
-            ("reporte", "Reporte", 200),
             ("estado", "Estado", 90),
             ("formato", "Formato", 70),
             ("duracion_seg", "Duracion(s)", 90),
-            ("archivo", "Archivo", 200),
-            ("mensaje", "Mensaje", 300),
+            ("parametros", "Parametros", 280),
+            ("archivo", "Archivo", 180),
+            ("mensaje", "Mensaje", 260),
         ):
             self._detail_tree.heading(col, text=text)
             self._detail_tree.column(col, width=width, anchor="w")
@@ -480,15 +481,32 @@ class CertificadosApp(tk.Tk):
         if run is None:
             return
 
+        import json
+
+        from certificados.diagnostics import expand_params
+
+        maps = {
+            field: {e.valor: e.descripcion for e in entries}
+            for field, entries in self._catalogs.items()
+        }
         self._detail_tree.delete(*self._detail_tree.get_children())
         for row in self.controller.read_run_results(run.results_path):
             estado = (row.get("estado") or "").upper()
+            try:
+                params = json.loads(row.get("parametros") or "{}")
+            except (ValueError, TypeError):
+                params = {}
+            legibles = expand_params(params, maps)
+            resumen = ", ".join(
+                f"{k}={v}" for k, v in legibles.items()
+                if v and not k.endswith("OBSERVACIONES")
+            )
             self._detail_tree.insert(
                 "", "end",
                 values=(
-                    row.get("fila", ""), row.get("reporte", ""), row.get("estado", ""),
-                    row.get("formato", ""), row.get("duracion_seg", ""),
-                    row.get("archivo", ""), row.get("mensaje", ""),
+                    row.get("fila", ""), row.get("estado", ""), row.get("formato", ""),
+                    row.get("duracion_seg", ""), resumen, row.get("archivo", ""),
+                    row.get("mensaje", ""),
                 ),
                 tags=(estado,) if estado in ("OK", "ERROR", "INVALIDO") else (),
             )
@@ -498,6 +516,31 @@ class CertificadosApp(tk.Tk):
         self._log_detail.delete("1.0", "end")
         self._log_detail.insert("end", text)
         self._log_detail.configure(state="disabled")
+
+    def _share_run(self) -> None:
+        """Empaqueta la ejecución seleccionada en un ZIP para enviar por correo."""
+        selection = self._runs_tree.selection()
+        if not selection:
+            messagebox.showinfo("Compartir", "Selecciona una ejecución primero.", parent=self)
+            return
+        run = self._runs_by_iid.get(selection[0])
+        if run is None:
+            return
+        stamp = run.results_path.stem.replace("resultados_", "")
+        dest = filedialog.asksaveasfilename(
+            title="Guardar diagnóstico",
+            defaultextension=".zip",
+            initialfile=f"diagnostico_{stamp}.zip",
+            filetypes=[("Archivo ZIP", "*.zip")],
+        )
+        if not dest:
+            return
+        try:
+            path = self.controller.build_share_zip(run, dest)
+        except Exception as exc:
+            messagebox.showerror("Compartir", f"No se pudo crear el ZIP:\n{exc}", parent=self)
+            return
+        messagebox.showinfo("Compartir", f"Diagnóstico guardado en:\n{path}", parent=self)
 
     # ---------------------------------------------------- SETTINGS / CATALOGOS
     def _open_settings(self) -> None:

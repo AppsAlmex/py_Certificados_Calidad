@@ -48,3 +48,12 @@ def test_missing_dir_and_files(tmp_path):
     assert list_runs(tmp_path / "nope") == []
     assert read_results(tmp_path / "nope.csv") == []
     assert read_log_text(tmp_path / "nope.log") == ""
+
+
+def test_logrun_deriva_rutas_diagnostico():
+    from pathlib import Path
+
+    run = LogRun(results_path=Path("logs/resultados_20260101_101010.csv"), fecha="x")
+    assert run.log_path.name == "ejecucion_20260101_101010.log"
+    assert run.diagnostics_path.name == "diagnostico_20260101_101010.jsonl"
+    assert run.context_path.name == "contexto_20260101_101010.txt"

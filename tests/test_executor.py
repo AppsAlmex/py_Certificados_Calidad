@@ -1,6 +1,7 @@
 import pytest
 import requests
 
+from certificados.diagnostics import InMemoryTransportCapture
 from certificados.exceptions import (
     AuthenticationError,
     FileSaveError,
@@ -89,3 +90,30 @@ def test_save_error(settings, valid_request, monkeypatch):
     monkeypatch.setattr("pathlib.Path.write_bytes", boom)
     with pytest.raises(FileSaveError):
         client.run_report(valid_request)
+
+
+def test_transport_capturado_en_ok(settings, valid_request):
+    session = FakeSession(FakeResponse(content=soap_response(b"%PDF fake")))
+    cap = InMemoryTransportCapture()
+    OracleReportClient(settings, session=session, transport=cap).run_report(valid_request)
+    rec = cap.get(valid_request.row_number)
+    assert rec is not None
+    assert rec.status == 200
+    assert rec.is_report is True
+    assert rec.size == len(b"%PDF fake")
+    assert rec.response_body is None
+    # SOAP redactado: la password real no aparece como valor (solo como nombre de tag).
+    assert ">pass<" not in rec.soap  # el valor "pass" no debe estar en el XML
+    assert "<v2:password>***</v2:password>" in rec.soap
+
+
+def test_transport_capturado_en_error_http(settings, valid_request):
+    session = FakeSession(FakeResponse(status_code=500, text="boom interno"))
+    cap = InMemoryTransportCapture()
+    with pytest.raises(ReportGenerationError):
+        OracleReportClient(settings, session=session, transport=cap).run_report(valid_request)
+    rec = cap.get(valid_request.row_number)
+    assert rec is not None
+    assert rec.is_report is False
+    assert "500" in (rec.response_body or "")
+    assert "<v2:password>***</v2:password>" in rec.soap

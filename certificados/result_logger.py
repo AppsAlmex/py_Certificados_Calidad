@@ -15,7 +15,7 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from .models import ReportRequest, ReportResult
 from .validators import ValidationIssue
@@ -36,7 +36,8 @@ _CSV_HEADER = [
 class ResultLogger:
     """Records the outcome of each request. One instance per batch run."""
 
-    def __init__(self, log_dir: str | Path, level: str = "INFO", extra_handlers=None, context=None):
+    def __init__(self, log_dir: str | Path, level: str = "INFO", extra_handlers=None,
+                 context=None, transport=None, param_expander: Callable[[dict], dict] | None = None):
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         # Contexto de la corrida (reporte, workers, timeout...). Igual para todas
@@ -50,6 +51,14 @@ class ResultLogger:
         self._results_file = self.results_path.open("w", encoding="utf-8", newline="")
         self._writer = csv.writer(self._results_file)
         self._writer.writerow(_CSV_HEADER)
+
+        # Diagnóstico: capturador de transporte + expansor de params legibles.
+        from .diagnostics import NullTransportCapture
+        self._transport = transport or NullTransportCapture()
+        self._param_expander = param_expander
+        self.diagnostics_path = self.log_dir / f"diagnostico_{stamp}.jsonl"
+        self._jsonl_file = self.diagnostics_path.open("w", encoding="utf-8")
+        self.context_path = self.log_dir / f"contexto_{stamp}.txt"
 
         # Unique name so concurrent/consecutive runs never share handlers.
         self._logger = logging.getLogger(f"certificados.{stamp}.{uuid.uuid4().hex[:8]}")
@@ -74,6 +83,13 @@ class ResultLogger:
             detalle = " ".join(f"{k}={v}" for k, v in self._context.items())
             self._logger.info("Inicio de ejecucion | %s", detalle)
 
+        # Contexto de la corrida en texto plano (para el zip de diagnóstico).
+        try:
+            lines = [f"{k}: {v}" for k, v in self._context.items()]
+            self.context_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
     # -- events -------------------------------------------------------------
     def log_success(self, result: ReportResult, duration: float) -> None:
         req = result.request
@@ -82,15 +98,18 @@ class ResultLogger:
             "Fila %s OK -> %s (%s bytes, %.2fs)",
             req.row_number, result.file_path.name, result.size_bytes, duration,
         )
+        self._jsonl(req, "OK", duration, str(result.file_path.name), "")
 
     def log_failure(self, request: ReportRequest, error: Exception, duration: float) -> None:
         self._row(request, "ERROR", duration, "", str(error))
         self._logger.error("Fila %s ERROR (%.2fs): %s", request.row_number, duration, error)
+        self._jsonl(request, "ERROR", duration, "", str(error))
 
     def log_invalid(self, request: ReportRequest, issues: Iterable[ValidationIssue], duration: float) -> None:
         message = "; ".join(str(i) for i in issues)
         self._row(request, "INVALIDO", duration, "", message)
         self._logger.warning("Fila %s INVALIDO: %s", request.row_number, message)
+        self._jsonl(request, "INVALIDO", duration, "", message)
 
     def summary(self, summary) -> None:
         self._logger.info("Resumen: %s", summary)
@@ -113,7 +132,37 @@ class ResultLogger:
             )
             self._results_file.flush()
 
+    def _jsonl(self, request: ReportRequest, estado: str, duration: float,
+               archivo: str, mensaje: str) -> None:
+        """Escribe una línea JSON consolidando estado/params con el transporte."""
+        try:
+            rec = self._transport.get(request.row_number)
+            params = dict(request.params)
+            legibles = self._param_expander(params) if self._param_expander else {}
+            entry = {
+                "fila": request.row_number,
+                "estado": estado,
+                "reporte": self._context.get("reporte", ""),
+                "formato": request.output_format,
+                "duracion_seg": round(duration, 2),
+                "archivo": archivo,
+                "params": params,
+                "params_legibles": legibles,
+                "soap_request": rec.soap if rec else None,
+                "http_status": rec.status if rec else None,
+                "respuesta": (rec.response_body if (rec and estado != "OK") else None),
+                "respuesta_size": rec.size if rec else None,
+                "mensaje": mensaje,
+            }
+            with self._lock:
+                self._jsonl_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                self._jsonl_file.flush()
+        except Exception:  # best-effort: el diagnóstico nunca tumba el logging
+            pass
+
     def close(self) -> None:
+        if hasattr(self, "_jsonl_file") and not self._jsonl_file.closed:
+            self._jsonl_file.close()
         if not self._results_file.closed:
             self._results_file.close()
         # Quitar todos del logger, pero cerrar solo los propios.
