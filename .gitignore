@@ -3,8 +3,9 @@
 certificados/_update_token.py
 
 # Runtime output
-output/
 logs/
+output/
+release/
 *.pdf
 *.xlsx
 *.csv
