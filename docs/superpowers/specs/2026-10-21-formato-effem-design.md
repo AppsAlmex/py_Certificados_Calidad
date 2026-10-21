@@ -117,6 +117,14 @@ bloque: "CODIFICACIÓN CLIENTE (EFFEM)".
 - Regresión: cliente no-EFFEM renderiza `formato1` sin el bloque disclaimer.
 - Herencia: `formato1.html` sigue renderizando igual (bloque vacío no afecta).
 
+### Aceptación end-to-end (manual)
+
+Correr el batch con `templates/template_EFFEM.csv` (embarque `1335761`), que
+devuelve de Oracle un XML con `NOMBRE_CLIENTE` de EFFEM. Verificar que el PDF
+resultante usa `formatoEFFEM` (resolver dispara por cliente, aunque la columna
+`formato` del CSV sea `1`) y muestra el disclaimer de codificación debajo de la
+tabla de info.
+
 ## Fuera de alcance (YAGNI)
 
 - Resolver material/sitio dinámico por producto/destino (se descartó: es
