@@ -17,6 +17,7 @@ from typing import List
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from .catalogs import load_cliente_formato, normalize_cliente
 from .certificate_data import CertificateData, parse_certificate
 from .exceptions import LayoutError
 from .runtime import app_dir, is_frozen, resource_dir
@@ -72,10 +73,14 @@ class LayoutRenderer(ABC):
 
 
 class HtmlLayoutRenderer(LayoutRenderer):
-    def __init__(self, templates_dir=LAYOUTS_DIR, assets_dir=None, page_format: str = "Letter"):
+    def __init__(self, templates_dir=LAYOUTS_DIR, assets_dir=None, page_format: str = "Letter",
+                 cliente_formato: dict[str, str] | None = None):
         self.templates_dir = Path(templates_dir)
         self.assets_dir = Path(assets_dir) if assets_dir else self.templates_dir / "assets"
         self.page_format = page_format
+        if cliente_formato is None:
+            cliente_formato = load_cliente_formato(app_dir() / "catalogos" / "cliente_formato.csv")
+        self.cliente_formato = cliente_formato
         self._env = Environment(
             loader=FileSystemLoader(str(self.templates_dir)),
             autoescape=select_autoescape(["html", "xml"]),
@@ -96,8 +101,16 @@ class HtmlLayoutRenderer(LayoutRenderer):
             )
         return name
 
+    def resolve_formato(self, data: CertificateData) -> str:
+        """Formato efectivo: override por cliente si aplica; si no, el del XML."""
+        cliente_norm = normalize_cliente(data.cliente)
+        for llave, formato in self.cliente_formato.items():
+            if llave and llave in cliente_norm:
+                return formato
+        return data.formato
+
     def render_html(self, data: CertificateData) -> str:
-        template = self._env.get_template(self.template_name(data.formato))
+        template = self._env.get_template(self.template_name(self.resolve_formato(data)))
         return template.render(d=data)
 
     def render(self, data: CertificateData) -> bytes:
