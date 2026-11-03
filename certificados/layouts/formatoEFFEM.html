@@ -1,0 +1,29 @@
+{% extends "formato1.html" %}
+{#
+  Formato EFFEM = formato1 + bloque de codificacion del cliente (disclaimer fijo).
+  Se selecciona automaticamente cuando NOMBRE_CLIENTE contiene "EFFEM"
+  (ver catalogos/cliente_formato.csv y HtmlLayoutRenderer.resolve_formato).
+#}
+{% block disclaimer %}
+  <table class="info" style="margin-top:10px;">
+    <tr>
+      <td class="lbl" colspan="2" style="text-align:center;">CODIFICACIÓN CLIENTE (EFFEM)</td>
+    </tr>
+    <tr>
+      <td class="lbl" style="width:40%;">GRD Material</td>
+      <td class="lbl">Approved receiving sites</td>
+    </tr>
+    <tr>
+      <td class="val">1181898 / 1101419 — Glucose 63DE Syrup</td>
+      <td class="val">ADM Cedar Rapids 80001247 · ADM Marshall 80001251</td>
+    </tr>
+    <tr>
+      <td class="val">1104072 — High Maltose Glucose Syrup</td>
+      <td class="val">Almidones Mexicanos 80003229 · ADM Cedar Rapids 80001247 · ADM Marshall 80001251</td>
+    </tr>
+    <tr>
+      <td class="val">1148993 — High Fructose Glucose Syrup</td>
+      <td class="val">ADM Cedar Rapids 80001247 · ADM Clinton 80004006 · ADM Columbus 80003710</td>
+    </tr>
+  </table>
+{% endblock %}
