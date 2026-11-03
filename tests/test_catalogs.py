@@ -94,3 +94,36 @@ def test_validate_catalog_detects_lost_chars(tmp_path):
     path = tmp_path / "c.csv"
     path.write_bytes(b"valor,descripcion\n1,Jos\xef\xbf\xbd Perez\n")  # U+FFFD grabado
     assert any("caracteres perdidos" in m for m in validate_catalog(path))
+
+
+from certificados.catalogs import load_cliente_formato, normalize_cliente
+
+
+def test_normalize_cliente_upper_trim_accents():
+    assert normalize_cliente("  Éffem México  ") == "EFFEM MEXICO"
+    assert normalize_cliente("") == ""
+
+
+def test_load_cliente_formato_basico(tmp_path):
+    path = write(tmp_path, "cliente,formato\nEFFEM,EFFEM\n", name="cf.csv")
+    assert load_cliente_formato(path) == {"EFFEM": "EFFEM"}
+
+
+def test_load_cliente_formato_normaliza_llave(tmp_path):
+    path = write(tmp_path, "cliente,formato\néffem,EFFEM\n", name="cf.csv")
+    assert load_cliente_formato(path) == {"EFFEM": "EFFEM"}
+
+
+def test_load_cliente_formato_missing_file(tmp_path):
+    assert load_cliente_formato(tmp_path / "no.csv") == {}
+
+
+def test_load_cliente_formato_filas_incompletas_ignoradas(tmp_path):
+    path = write(tmp_path, "cliente,formato\nEFFEM,EFFEM\n,X\nACME,\n", name="cf.csv")
+    assert load_cliente_formato(path) == {"EFFEM": "EFFEM"}
+
+
+def test_load_cliente_formato_falta_columna(tmp_path):
+    path = write(tmp_path, "cliente,descripcion\nEFFEM,x\n", name="cf.csv")
+    with pytest.raises(CatalogError, match="formato"):
+        load_cliente_formato(path)

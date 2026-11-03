@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import io
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
@@ -111,3 +112,38 @@ def validate_catalog(path: str | Path) -> List[str]:
     if validas == 0:
         issues.append(f"{file.name}: sin filas validas")
     return issues
+
+
+def normalize_cliente(text: str) -> str:
+    """Normaliza un nombre de cliente para comparar: mayusculas, sin acentos, trim."""
+    if not text:
+        return ""
+    nfkd = unicodedata.normalize("NFKD", text)
+    sin_acentos = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return sin_acentos.upper().strip()
+
+
+def load_cliente_formato(path: str | Path) -> dict[str, str]:
+    """Lee un CSV ``cliente,formato`` -> ``{cliente_normalizado: formato}``.
+
+    Archivo ausente -> {} (no es error, el campo simplemente no tiene overrides).
+    Falta columna 'cliente' o 'formato' -> CatalogError.
+    """
+    file = Path(path)
+    if not file.exists():
+        return {}
+    reader = csv.DictReader(io.StringIO(_read_text(file)))
+    headers = [(h or "").strip().lower() for h in (reader.fieldnames or [])]
+    if "cliente" not in headers or "formato" not in headers:
+        raise CatalogError(
+            f"El catalogo {file} debe tener columnas 'cliente' y 'formato'"
+        )
+    mapping: dict[str, str] = {}
+    for row in reader:
+        norm = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+        cliente = norm.get("cliente", "")
+        formato = norm.get("formato", "")
+        if not cliente or not formato:
+            continue
+        mapping[normalize_cliente(cliente)] = formato
+    return mapping
