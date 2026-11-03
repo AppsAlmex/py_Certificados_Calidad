@@ -34,6 +34,7 @@ def test_effem_render_contiene_codificacion():
                  "80001247", "80001251", "80003229", "80004006", "80003710"):
         assert code in html, f"falta {code}"
     assert "CODIFICACI" in html  # titulo del disclaimer
+    assert html.index("80003229") < html.index('class="params"')
 
 
 def test_no_effem_sin_disclaimer():
@@ -42,3 +43,4 @@ def test_no_effem_sin_disclaimer():
     html = r.render_html(d)
     assert "80003229" not in html
     assert "High Maltose" not in html
+    assert "CODIFICACI" not in html

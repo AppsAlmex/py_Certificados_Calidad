@@ -79,6 +79,8 @@ class HtmlLayoutRenderer(LayoutRenderer):
         self.assets_dir = Path(assets_dir) if assets_dir else self.templates_dir / "assets"
         self.page_format = page_format
         if cliente_formato is None:
+            # Nota: cliente_formato.csv se busca siempre en catalogos/ (no honra
+            # [catalogs] dir del config, a diferencia de los otros catalogos).
             cliente_formato = load_cliente_formato(app_dir() / "catalogos" / "cliente_formato.csv")
         self.cliente_formato = cliente_formato
         self._env = Environment(

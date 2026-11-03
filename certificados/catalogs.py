@@ -140,7 +140,11 @@ def load_cliente_formato(path: str | Path) -> dict[str, str]:
         )
     mapping: dict[str, str] = {}
     for row in reader:
-        norm = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+        norm = {}
+        for k, v in row.items():
+            if k is None:
+                continue
+            norm[k.strip().lower()] = v.strip() if isinstance(v, str) else ""
         cliente = norm.get("cliente", "")
         formato = norm.get("formato", "")
         if not cliente or not formato:

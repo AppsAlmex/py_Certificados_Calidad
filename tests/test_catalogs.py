@@ -123,6 +123,11 @@ def test_load_cliente_formato_filas_incompletas_ignoradas(tmp_path):
     assert load_cliente_formato(path) == {"EFFEM": "EFFEM"}
 
 
+def test_load_cliente_formato_fila_con_campo_extra_no_revienta(tmp_path):
+    path = write(tmp_path, "cliente,formato\nEFFEM,EFFEM,basura\nACME,2\n", name="cf.csv")
+    assert load_cliente_formato(path) == {"EFFEM": "EFFEM", "ACME": "2"}
+
+
 def test_load_cliente_formato_falta_columna(tmp_path):
     path = write(tmp_path, "cliente,descripcion\nEFFEM,x\n", name="cf.csv")
     with pytest.raises(CatalogError, match="formato"):

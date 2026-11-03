@@ -106,6 +106,9 @@ bloque: "CODIFICACIÓN CLIENTE (EFFEM)".
   otros catálogos).
 - Formato resuelto sin plantilla (`formatoEFFEM.html` no existe) → el
   `template_name` actual ya lanza `LayoutError` con mensaje claro.
+- Limitación conocida: si un despliegue personaliza `[catalogs] dir`,
+  `cliente_formato.csv` debe seguir en `catalogos/`; de lo contrario el override
+  EFFEM deja de aplicarse en silencio.
 
 ## Pruebas
 
